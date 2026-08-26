@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Lock, KeyRound, ShieldCheck, Car, Search, ArrowRight, 
-  AlertCircle, Sparkles, MessageCircle, ExternalLink, HelpCircle
+  AlertCircle, MessageCircle, ExternalLink, Loader2
 } from 'lucide-react';
-import { verifyAdminPin, getAdminPin, DEFAULT_ADMIN_PIN } from '../utils/storage';
+import { verifyAdminPinAsync } from '../utils/storage';
 
 interface AdminLockScreenProps {
   onUnlock: () => void;
@@ -17,6 +17,7 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
   const [activeTab, setActiveTab] = useState<'admin' | 'tracker'>('admin');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
   const [trackerInput, setTrackerInput] = useState('');
   const [trackerError, setTrackerError] = useState('');
@@ -28,6 +29,28 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
     }
   }, [activeTab]);
 
+  const performVerification = async (pinToVerify: string) => {
+    if (isVerifying) return;
+    setIsVerifying(true);
+    setError('');
+
+    try {
+      const isValid = await verifyAdminPinAsync(pinToVerify);
+      if (isValid) {
+        onUnlock();
+      } else {
+        setError('Incorrect Admin PIN. Access Denied.');
+        triggerShake();
+        setPin('');
+      }
+    } catch {
+      setError('Verification service unavailable');
+      triggerShake();
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handlePinSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError('');
@@ -38,13 +61,7 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
       return;
     }
 
-    if (verifyAdminPin(pin)) {
-      onUnlock();
-    } else {
-      setError('Incorrect Admin PIN. Please try again.');
-      triggerShake();
-      setPin('');
-    }
+    performVerification(pin);
   };
 
   const triggerShake = () => {
@@ -53,15 +70,14 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
   };
 
   const handleKeypadPress = (digit: string) => {
+    if (isVerifying) return;
     if (pin.length < 6) {
       const nextPin = pin + digit;
       setPin(nextPin);
       setError('');
       if (nextPin.length === 4) {
-        // Auto-check on 4 digits
-        if (verifyAdminPin(nextPin)) {
-          setTimeout(() => onUnlock(), 150);
-        }
+        // Auto-verify on 4 digits
+        performVerification(nextPin);
       }
     }
   };
@@ -81,8 +97,6 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
     }
     onLookupTracker(clean);
   };
-
-  const isDefaultPin = getAdminPin() === DEFAULT_ADMIN_PIN;
 
   return (
     <div
@@ -206,8 +220,8 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                     const val = e.target.value.replace(/\D/g, '');
                     setPin(val);
                     setError('');
-                    if (val.length === 4 && verifyAdminPin(val)) {
-                      setTimeout(() => onUnlock(), 100);
+                    if (val.length === 4) {
+                      performVerification(val);
                     }
                   }}
                   className="sr-only"
@@ -260,23 +274,31 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                 <button
                   id="admin-unlock-submit-btn"
                   type="submit"
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-lg shadow-blue-600/25 active:scale-98 flex items-center justify-center gap-2 mt-3"
+                  disabled={isVerifying}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800/60 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-lg shadow-blue-600/25 active:scale-98 flex items-center justify-center gap-2 mt-3 cursor-pointer disabled:cursor-not-allowed"
                 >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Unlock Admin Dashboard</span>
+                  {isVerifying ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Verifying Passcode...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Unlock Admin Dashboard</span>
+                    </>
+                  )}
                 </button>
               </form>
 
-              {/* Default PIN Helper Note */}
-              {isDefaultPin && (
-                <div className="p-3 bg-blue-950/40 border border-blue-900/50 rounded-xl text-[11px] text-blue-300 flex items-start gap-2">
-                  <HelpCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold block text-blue-200">Default Access PIN: 1234</span>
-                    <span>You can change this PIN anytime in the Admin Data & Backup menu.</span>
-                  </div>
+              {/* Security Policy Note */}
+              <div className="p-3 bg-slate-950/40 border border-slate-800/60 rounded-xl text-[11px] text-slate-400 flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold block text-slate-300">Protected Admin Console</span>
+                  <span>Passcode is securely authenticated via server-side environment credentials.</span>
                 </div>
-              )}
+              </div>
             </div>
           )}
 

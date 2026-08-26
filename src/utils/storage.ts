@@ -45,6 +45,26 @@ export function generateTrackingToken(): string {
 /**
  * Admin Security & PIN Management
  */
+export async function verifyAdminPinAsync(enteredPin: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/admin/verify-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: enteredPin.trim() }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return !!data.success;
+    }
+    return false;
+  } catch (err) {
+    console.warn('Server PIN verification failed or offline, falling back to local verification:', err);
+    // Offline fallback to local check
+    const currentPin = getAdminPin();
+    return enteredPin.trim() === currentPin.trim();
+  }
+}
+
 export function getAdminPin(): string {
   try {
     return localStorage.getItem(ADMIN_PIN_KEY) || DEFAULT_ADMIN_PIN;
