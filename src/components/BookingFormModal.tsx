@@ -42,12 +42,12 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
   const [driverBirthdate, setDriverBirthdate] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseExpiration, setLicenseExpiration] = useState('');
-  const [passengers, setPassengers] = useState<number>(2);
+  const [passengers, setPassengers] = useState<number | string>(2);
   const [startLocation, setStartLocation] = useState('');
   const [destination, setDestination] = useState('');
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('09:00');
-  const [noOfDays, setNoOfDays] = useState<number>(1);
+  const [noOfDays, setNoOfDays] = useState<number | string>(1);
   const [notes, setNotes] = useState('');
   const [colorTag, setColorTag] = useState('indigo');
 
@@ -122,11 +122,11 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setLicenseNumber('');
       setLicenseExpiration('');
       setVehicleModel('Toyota Hiace Commuter Van');
-      if (passengers < 6) setPassengers(8);
+      if (Number(passengers) < 6) setPassengers(8);
     } else {
       setSelfDrive(true);
       setVehicleModel('Toyota Vios');
-      if (passengers > 7) setPassengers(4);
+      if (Number(passengers) > 7) setPassengers(4);
     }
   };
 
@@ -139,15 +139,22 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     if (!destination.trim()) errs.destination = 'Destination is required';
     if (!startDate) errs.startDate = 'Start date is required';
     if (!startTime) errs.startTime = 'Start time is required';
-    if (!noOfDays || noOfDays < 1) errs.noOfDays = 'Minimum duration is 1 day';
-    if (!passengers || passengers < 1) errs.passengers = 'Must have at least 1 passenger';
-
-    // Van passenger safety check
-    if (vehicle === 'Car' && passengers > 7) {
-      errs.passengers = 'Standard cars allow a maximum of 7 passengers';
+    
+    const parsedDays = Number(noOfDays);
+    if (!noOfDays || isNaN(parsedDays) || parsedDays < 1) {
+      errs.noOfDays = 'Minimum duration is 1 day';
     }
-    if (vehicle === 'Van' && passengers > 18) {
-      errs.passengers = 'Vans allow a maximum of 18 passengers';
+
+    const parsedPax = Number(passengers);
+    if (!passengers || isNaN(parsedPax) || parsedPax < 1) {
+      errs.passengers = 'Must have at least 1 passenger';
+    } else {
+      if (vehicle === 'Car' && parsedPax > 7) {
+        errs.passengers = 'Standard cars allow a maximum of 7 passengers';
+      }
+      if (vehicle === 'Van' && parsedPax > 18) {
+        errs.passengers = 'Vans allow a maximum of 18 passengers';
+      }
     }
 
     // Driver's license validation when selfDrive is true (only on Car)
@@ -202,13 +209,12 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     onSubmit(bookingData);
   };
 
-  if (!isOpen) return null;
-
   // Real-time calculated end preview & conflict check
   let calculatedEndPreview = '';
-  if (startDate && startTime && noOfDays >= 1) {
+  const numDays = Number(noOfDays);
+  if (startDate && startTime && !isNaN(numDays) && numDays >= 1) {
     try {
-      const endDt = getBookingEndDateTime({ startDate, startTime, noOfDays });
+      const endDt = getBookingEndDateTime({ startDate, startTime, noOfDays: numDays });
       calculatedEndPreview = formatDateTime(endDt);
     } catch {
       calculatedEndPreview = '';
@@ -216,19 +222,22 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
   }
 
   const activeConflict = useMemo(() => {
-    if (!allBookings || allBookings.length === 0 || !startDate || !startTime || !noOfDays) return null;
+    const validNumDays = Number(noOfDays);
+    if (!allBookings || allBookings.length === 0 || !startDate || !startTime || isNaN(validNumDays) || validNumDays < 1) return null;
     return checkBookingConflicts(
       {
         id: editingBooking?.id,
         startDate,
         startTime,
-        noOfDays: Number(noOfDays),
+        noOfDays: validNumDays,
         vehicle,
       },
       allBookings,
       true
     );
   }, [allBookings, startDate, startTime, noOfDays, vehicle, editingBooking?.id]);
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -272,7 +281,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
               1. Customer Information
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Customer Full Name <span className="text-red-500">*</span>
                 </label>
@@ -285,7 +294,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Juan Dela Cruz"
-                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
                       errors.name ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -293,7 +302,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                 {errors.name && <p className="text-[11px] text-red-600 mt-1">{errors.name}</p>}
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Mobile Number <span className="text-red-500">*</span>
                 </label>
@@ -306,7 +315,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     value={mobileNo}
                     onChange={(e) => setMobileNo(e.target.value)}
                     placeholder="09123456789"
-                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
                       errors.mobileNo ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -325,7 +334,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Vehicle Type Dropdown */}
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Vehicle Type <span className="text-red-500">*</span>
                 </label>
@@ -333,7 +342,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   id="booking-vehicle-select"
                   value={vehicle}
                   onChange={(e) => handleVehicleChange(e.target.value as VehicleType)}
-                  className="w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
+                  className="w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
                 >
                   <option value="Car">Car (Self-Drive Allowed)</option>
                   <option value="Van">Van (Chauffeur Only)</option>
@@ -341,7 +350,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
               </div>
 
               {/* Uneditable Model field with label 'Model' */}
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Model
                 </label>
@@ -351,12 +360,12 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   readOnly
                   disabled
                   value={vehicle === 'Car' ? 'Toyota Vios' : 'Toyota Hiace Commuter Van'}
-                  className="w-full px-3 py-2.5 text-base sm:text-xs bg-slate-100/90 border border-slate-200 rounded-lg text-slate-700 font-semibold cursor-not-allowed select-none"
+                  className="w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-100/90 border border-slate-200 rounded-lg text-slate-700 font-semibold cursor-not-allowed select-none"
                 />
               </div>
 
               {/* Passenger Count */}
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Passengers <span className="text-red-500">*</span>
                 </label>
@@ -369,8 +378,16 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     max={vehicle === 'Car' ? 7 : 18}
                     required
                     value={passengers}
-                    onChange={(e) => setPassengers(Number(e.target.value))}
-                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setPassengers('');
+                      } else {
+                        const parsed = parseInt(val, 10);
+                        setPassengers(isNaN(parsed) ? '' : parsed);
+                      }
+                    }}
+                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                       errors.passengers ? 'border-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -435,7 +452,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                       {/* Driver Name and Birthdate Grid */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {/* Driver Name Field */}
-                        <div>
+                        <div className="min-w-0">
                           <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5 text-blue-600" />
                             Driver Full Name
@@ -447,14 +464,14 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                             onChange={(e) => setDriverName(e.target.value)}
                             disabled={renterIsDriver}
                             placeholder="e.g. Maria Santos"
-                            className={`w-full px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                               renterIsDriver ? 'bg-slate-100/80 text-slate-500 cursor-not-allowed border-slate-200' : 'border-slate-200 text-slate-900'
                             }`}
                           />
                         </div>
 
                         {/* Driver Birthdate Field */}
-                        <div>
+                        <div className="min-w-0">
                           <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
                             <Calendar className="w-3.5 h-3.5 text-blue-600" />
                             Driver Birthdate
@@ -465,7 +482,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                             value={driverBirthdate}
                             onChange={(e) => setDriverBirthdate(e.target.value)}
                             max={new Date().toISOString().split('T')[0]}
-                            className="w-full px-3 py-2.5 text-base sm:text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
+                            className="w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
                           />
                         </div>
                       </div>
@@ -473,7 +490,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                       {/* License Number & Expiration Date */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {/* License Number Field */}
-                        <div>
+                        <div className="min-w-0">
                           <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
                             <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
                             License Number <span className="text-red-500">*</span>
@@ -485,7 +502,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                             value={licenseNumber}
                             onChange={(e) => setLicenseNumber(e.target.value)}
                             placeholder="DL-8893021"
-                            className={`w-full px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                               errors.licenseNumber ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
                             }`}
                           />
@@ -495,7 +512,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                         </div>
 
                         {/* Expiration Date Field */}
-                        <div>
+                        <div className="min-w-0">
                           <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
                             <Calendar className="w-3.5 h-3.5 text-blue-600" />
                             Expiration Date <span className="text-red-500">*</span>
@@ -507,7 +524,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                             value={licenseExpiration}
                             onChange={(e) => setLicenseExpiration(e.target.value)}
                             placeholder="01/01/2030"
-                            className={`w-full px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                               errors.licenseExpiration ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
                             }`}
                           />
@@ -541,7 +558,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
               3. Route Details
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Start Location <span className="text-red-500">*</span>
                 </label>
@@ -554,7 +571,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     value={startLocation}
                     onChange={(e) => setStartLocation(e.target.value)}
                     placeholder="Tarlac City, Tarlac"
-                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       errors.startLocation ? 'border-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -562,7 +579,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                 {errors.startLocation && <p className="text-[11px] text-red-600 mt-1">{errors.startLocation}</p>}
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Destination <span className="text-red-500">*</span>
                 </label>
@@ -575,7 +592,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     value={destination}
                     onChange={(e) => setDestination(e.target.value)}
                     placeholder="San Fernando, Pampanga"
-                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       errors.destination ? 'border-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -594,7 +611,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Start Date */}
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Start Date <span className="text-red-500">*</span>
                 </label>
@@ -604,7 +621,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   required
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className={`w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                  className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                     errors.startDate ? 'border-red-400' : 'border-slate-200'
                   }`}
                 />
@@ -612,7 +629,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
               </div>
 
               {/* Start Time */}
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Start Time <span className="text-red-500">*</span>
                 </label>
@@ -622,7 +639,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   required
                   value={startTime}
                   onChange={(e) => setStartTime(e.target.value)}
-                  className={`w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                  className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                     errors.startTime ? 'border-red-400' : 'border-slate-200'
                   }`}
                 />
@@ -630,7 +647,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
               </div>
 
               {/* Number of Days */}
-              <div>
+              <div className="min-w-0">
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   No. of Days <span className="text-red-500">*</span>
                 </label>
@@ -642,8 +659,16 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   step="1"
                   required
                   value={noOfDays}
-                  onChange={(e) => setNoOfDays(Math.max(1, Number(e.target.value)))}
-                  className={`w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '') {
+                      setNoOfDays('');
+                    } else {
+                      const parsed = parseInt(val, 10);
+                      setNoOfDays(isNaN(parsed) ? '' : parsed);
+                    }
+                  }}
+                  className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                     errors.noOfDays ? 'border-red-400' : 'border-slate-200'
                   }`}
                 />
@@ -661,7 +686,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   </span>
                 </div>
                 <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700">
-                  {noOfDays * 24} Hours Total
+                  {Number(noOfDays || 0) * 24} Hours Total
                 </span>
               </div>
             )}
