@@ -8,6 +8,7 @@ import { ConflictWarningModal } from './components/ConflictWarningModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { RenterTrackerView } from './components/RenterTrackerView';
 import { AdminLockScreen } from './components/AdminLockScreen';
+import { PublicAvailabilityCalendar } from './components/PublicAvailabilityCalendar';
 import { ChangePinModal } from './components/ChangePinModal';
 import { ToastProvider, useToast } from './components/Toast';
 import { Booking, VehicleType } from './types';
@@ -51,6 +52,7 @@ function MainApp() {
 
   // Active public tracker route detection (from URL query ?tracker=ID or #tracker=ID)
   const [activeTrackerId, setActiveTrackerId] = useState<string | null>(null);
+  const [isViewingPublicCalendar, setIsViewingPublicCalendar] = useState<boolean>(false);
 
   // Real-time Firestore sync & offline cache subscription
   useEffect(() => {
@@ -76,16 +78,28 @@ function MainApp() {
     const parseUrl = () => {
       const urlParams = new URLSearchParams(window.location.search);
       const trackerParam = urlParams.get('tracker');
+      const viewParam = urlParams.get('view');
+
       if (trackerParam) {
         setActiveTrackerId(trackerParam);
+        setIsViewingPublicCalendar(false);
         return;
       }
       const hash = window.location.hash;
       if (hash.startsWith('#tracker=')) {
         setActiveTrackerId(hash.replace('#tracker=', ''));
+        setIsViewingPublicCalendar(false);
         return;
       }
+
+      if (viewParam === 'calendar' || viewParam === 'availability' || hash === '#calendar' || hash === '#availability') {
+        setIsViewingPublicCalendar(true);
+        setActiveTrackerId(null);
+        return;
+      }
+
       setActiveTrackerId(null);
+      setIsViewingPublicCalendar(false);
     };
 
     parseUrl();
@@ -96,12 +110,22 @@ function MainApp() {
   // Handle open tracker public view
   const handleOpenTracker = (bookingId: string) => {
     setActiveTrackerId(bookingId);
+    setIsViewingPublicCalendar(false);
     const newUrl = `${window.location.pathname}?tracker=${bookingId}`;
     window.history.pushState({ tracker: bookingId }, '', newUrl);
   };
 
+  // Handle open public calendar view
+  const handleOpenPublicCalendar = () => {
+    setIsViewingPublicCalendar(true);
+    setActiveTrackerId(null);
+    const newUrl = `${window.location.pathname}?view=calendar`;
+    window.history.pushState({ view: 'calendar' }, '', newUrl);
+  };
+
   const handleBackToAdmin = () => {
     setActiveTrackerId(null);
+    setIsViewingPublicCalendar(false);
     window.history.pushState({}, '', window.location.pathname);
   };
 
@@ -213,14 +237,46 @@ function MainApp() {
     );
   }
 
+  // If in explicit Public Availability Calendar view (or opened via link)
+  if (isViewingPublicCalendar) {
+    return (
+      <div className="relative">
+        {isAdminUnlocked && (
+          <div className="bg-blue-900 border-b border-blue-800 text-white text-xs px-4 py-2 flex items-center justify-between sticky top-0 z-40">
+            <span className="font-semibold flex items-center gap-1.5">
+              <span>👀 You are previewing the Public Availability Calendar (Potential Renters View)</span>
+            </span>
+            <button
+              onClick={handleBackToAdmin}
+              className="px-3 py-1 bg-white text-blue-900 font-bold rounded hover:bg-blue-50 transition-colors text-xs"
+            >
+              Back to Admin Dashboard
+            </button>
+          </div>
+        )}
+        <PublicAvailabilityCalendar
+          bookings={bookings}
+          onOpenTrackerLookup={() => {
+            const id = prompt('Enter your Booking ID or Tracking Reference:') || '';
+            if (id.trim()) handleOpenTracker(id.trim());
+          }}
+          onOpenAdminLogin={() => {
+            setIsViewingPublicCalendar(false);
+          }}
+        />
+      </div>
+    );
+  }
+
   // Security Gate: Protect admin dashboard with PIN passkey
   if (!isAdminUnlocked) {
     return (
       <AdminLockScreen
+        bookings={bookings}
         onUnlock={() => {
           setAdminSessionActive(true);
           setIsAdminUnlocked(true);
-          showToast('Admin Console Unlocked', 'Welcome to Miranda Rentals Fleet Management', 'success');
+          showToast('Admin Console Unlocked', 'Welcome to Miranda Rentals Booking System', 'success');
         }}
         onLookupTracker={(trackerKey) => {
           handleOpenTracker(trackerKey);
@@ -237,6 +293,7 @@ function MainApp() {
         onResetSeedData={handleResetSeedData}
         bookings={bookings}
         onOpenTracker={handleOpenTracker}
+        onOpenPublicCalendar={handleOpenPublicCalendar}
         isPublicTrackerView={false}
         isOnline={isOnline}
         onLockAdmin={() => {

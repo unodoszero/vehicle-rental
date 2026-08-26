@@ -13,6 +13,7 @@ interface NavbarProps {
   onResetSeedData: () => void;
   bookings: Booking[];
   onOpenTracker: (bookingId: string) => void;
+  onOpenPublicCalendar?: () => void;
   isPublicTrackerView: boolean;
   isOnline?: boolean;
   isSyncing?: boolean;
@@ -25,6 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onResetSeedData,
   bookings,
   onOpenTracker,
+  onOpenPublicCalendar,
   isPublicTrackerView,
   isOnline = true,
   isSyncing = false,
@@ -147,6 +149,20 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="text-slate-300">•</span>
               <span className="font-bold text-slate-900">{formatTimeOnly(currentTime)}</span>
             </div>
+
+            {/* Public Availability Calendar button */}
+            {onOpenPublicCalendar && (
+              <button
+                id="navbar-public-calendar-btn"
+                type="button"
+                onClick={onOpenPublicCalendar}
+                className="p-2 sm:px-3 sm:py-2 text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100/80 border border-blue-200 rounded-lg transition-all flex items-center gap-1.5"
+                title="Preview public availability calendar for renters"
+              >
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                <span className="hidden sm:inline">Public Calendar</span>
+              </button>
+            )}
 
             {/* Public Tracker Quick Preview Dropdown */}
             <div className="relative">

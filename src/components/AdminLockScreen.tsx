@@ -1,20 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Lock, KeyRound, ShieldCheck, Car, Search, ArrowRight, 
-  AlertCircle, MessageCircle, ExternalLink, Loader2
+  AlertCircle, MessageCircle, ExternalLink, Loader2, Calendar
 } from 'lucide-react';
 import { verifyAdminPinAsync } from '../utils/storage';
+import { Booking } from '../types';
+import { PublicAvailabilityCalendar } from './PublicAvailabilityCalendar';
 
 interface AdminLockScreenProps {
   onUnlock: () => void;
   onLookupTracker: (identifier: string) => void;
+  bookings?: Booking[];
+  initialTab?: 'calendar' | 'admin' | 'tracker';
 }
 
 export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
   onUnlock,
   onLookupTracker,
+  bookings = [],
+  initialTab = 'calendar',
 }) => {
-  const [activeTab, setActiveTab] = useState<'admin' | 'tracker'>('admin');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'admin' | 'tracker'>(initialTab);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
@@ -98,6 +104,17 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
     onLookupTracker(clean);
   };
 
+  // If Public Calendar tab is chosen, display the full Public Availability Calendar page
+  if (activeTab === 'calendar') {
+    return (
+      <PublicAvailabilityCalendar
+        bookings={bookings}
+        onOpenTrackerLookup={() => setActiveTab('tracker')}
+        onOpenAdminLogin={() => setActiveTab('admin')}
+      />
+    );
+  }
+
   return (
     <div
       id="admin-lock-screen"
@@ -119,14 +136,25 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                 Miranda Rentals & Services
               </span>
               <span className="text-xs sm:text-sm font-bold text-white tracking-tight leading-tight block">
-                Fleet Management & Operations
+                Booking System
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 text-[11px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Secure Access</span>
+          <div className="flex items-center gap-2">
+            <button
+              id="header-calendar-view-btn"
+              type="button"
+              onClick={() => setActiveTab('calendar')}
+              className="px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 rounded-lg text-xs font-semibold text-blue-300 hover:text-white flex items-center gap-1.5 transition-all"
+            >
+              <Calendar className="w-3.5 h-3.5 text-blue-400" />
+              <span>Public Calendar</span>
+            </button>
+            <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Secure Access</span>
+            </div>
           </div>
         </div>
       </header>
@@ -138,8 +166,18 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
             isShaking ? 'animate-bounce' : ''
           }`}
         >
-          {/* Navigation Tabs (Admin Gate vs Customer Tracker Lookup) */}
-          <div className="grid grid-cols-2 p-1.5 bg-slate-950/80 border-b border-slate-800 text-xs font-bold">
+          {/* Navigation Tabs (Public Calendar, Admin Login, Customer Tracker) */}
+          <div className="grid grid-cols-3 p-1.5 bg-slate-950/80 border-b border-slate-800 text-xs font-bold">
+            <button
+              id="public-calendar-tab-btn"
+              type="button"
+              onClick={() => setActiveTab('calendar')}
+              className="py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 text-slate-400 hover:text-slate-200"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Calendar</span>
+            </button>
+
             <button
               id="admin-auth-tab-btn"
               type="button"
@@ -147,14 +185,14 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                 setActiveTab('admin');
                 setError('');
               }}
-              className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 ${
                 activeTab === 'admin'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>Admin Passkey</span>
+              <span>Admin PIN</span>
             </button>
 
             <button
@@ -164,14 +202,14 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                 setActiveTab('tracker');
                 setTrackerError('');
               }}
-              className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 ${
                 activeTab === 'tracker'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Search className="w-3.5 h-3.5" />
-              <span>Renter Tracker</span>
+              <span>Tracker</span>
             </button>
           </div>
 
@@ -228,13 +266,6 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                   autoFocus
                 />
 
-                {error && (
-                  <div className="p-3 bg-red-950/60 border border-red-800/80 rounded-xl flex items-center gap-2 text-xs text-red-200 animate-fade-in">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
-
                 {/* On-screen Numeric Keypad */}
                 <div className="grid grid-cols-3 gap-2 pt-2">
                   {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
@@ -271,6 +302,14 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                   </button>
                 </div>
 
+                {/* Access Denied Notification (placed below Clear, 0, Delete) */}
+                {error && (
+                  <div className="p-3 bg-red-950/70 border border-red-800/90 rounded-xl flex items-center justify-center gap-2 text-xs text-red-200 animate-fade-in shadow-sm">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span className="font-medium text-center">{error}</span>
+                  </div>
+                )}
+
                 <button
                   id="admin-unlock-submit-btn"
                   type="submit"
@@ -290,15 +329,6 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
                   )}
                 </button>
               </form>
-
-              {/* Security Policy Note */}
-              <div className="p-3 bg-slate-950/40 border border-slate-800/60 rounded-xl text-[11px] text-slate-400 flex items-start gap-2">
-                <ShieldCheck className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-semibold block text-slate-300">Protected Admin Console</span>
-                  <span>Passcode is securely authenticated via server-side environment credentials.</span>
-                </div>
-              </div>
             </div>
           )}
 

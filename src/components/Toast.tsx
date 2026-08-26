@@ -41,14 +41,14 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {children}
       <div
         id="toast-container"
-        className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none max-w-md w-full px-4"
+        className="fixed bottom-5 sm:bottom-6 inset-x-0 sm:inset-x-auto sm:right-6 z-50 flex flex-col items-center sm:items-end gap-2 pointer-events-none px-4 sm:px-0 w-full sm:w-auto max-w-md mx-auto sm:mx-0"
         aria-live="polite"
       >
         {toasts.map((toast) => (
           <div
             key={toast.id}
             id={`toast-${toast.id}`}
-            className={`pointer-events-auto flex items-start gap-3 p-3.5 rounded-lg shadow-xl border backdrop-blur-xs transition-all duration-300 transform translate-y-0 ${
+            className={`pointer-events-auto w-full max-w-sm sm:max-w-md flex items-start gap-3 p-3.5 rounded-xl shadow-2xl border backdrop-blur-md transition-all duration-300 transform translate-y-0 ${
               toast.type === 'success'
                 ? 'bg-slate-900 text-white border-slate-700 shadow-slate-950/20'
                 : toast.type === 'warning'
