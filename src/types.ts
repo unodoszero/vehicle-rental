@@ -21,6 +21,7 @@ export interface Booking {
   noOfDays: number;  // Duration in days
   notes?: string;
   colorTag: string;  // Hex or Tailwind color token for continuous visual bar
+  trackingToken?: string; // Cryptographically random secure tracking token
   createdAt: string; // ISO timestamp
   updatedAt?: string;
 }

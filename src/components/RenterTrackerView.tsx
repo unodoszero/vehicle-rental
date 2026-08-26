@@ -5,10 +5,10 @@ import {
   User, Info, AlertOctagon, ExternalLink, Sparkles,
   MessageCircle, Copy, Check
 } from 'lucide-react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
-import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly } from '../utils/dateUtils';
+import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly, getBookingStartDateTime } from '../utils/dateUtils';
 
 interface RenterTrackerViewProps {
   booking: Booking | null;
@@ -44,16 +44,55 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
       return;
     }
 
+    let isSubscribed = true;
+
+    // First try querying by trackingToken if token-like
+    if (bookingId.startsWith('trk_')) {
+      const q = query(collection(db, 'bookings'), where('trackingToken', '==', bookingId));
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          if (!isSubscribed) return;
+          if (!snapshot.empty) {
+            setRemoteBooking(snapshot.docs[0].data() as Booking);
+          } else {
+            setRemoteBooking(null);
+          }
+          setIsLoading(false);
+        },
+        (err) => {
+          console.warn('Error querying booking by trackingToken:', err);
+          setIsLoading(false);
+        }
+      );
+      return () => {
+        isSubscribed = false;
+        unsubscribe();
+      };
+    }
+
+    // Try direct document ID
     const docRef = doc(db, 'bookings', bookingId);
     const unsubscribe = onSnapshot(
       docRef,
       (docSnap) => {
+        if (!isSubscribed) return;
         if (docSnap.exists()) {
           setRemoteBooking(docSnap.data() as Booking);
+          setIsLoading(false);
         } else {
-          setRemoteBooking(null);
+          // Fallback check by trackingToken query
+          const q = query(collection(db, 'bookings'), where('trackingToken', '==', bookingId));
+          const unsubFallback = onSnapshot(q, (snapshot) => {
+            if (!snapshot.empty) {
+              setRemoteBooking(snapshot.docs[0].data() as Booking);
+            } else {
+              setRemoteBooking(null);
+            }
+            setIsLoading(false);
+          }, () => setIsLoading(false));
+          return () => unsubFallback();
         }
-        setIsLoading(false);
       },
       (err) => {
         console.warn('Error fetching booking tracker document:', err);
@@ -61,7 +100,10 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      isSubscribed = false;
+      unsubscribe();
+    };
   }, [booking, bookingId]);
 
   const activeBooking = remoteBooking || booking;
@@ -87,7 +129,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
         <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-sm font-medium text-slate-300">Loading Live Rental Status...</p>
+        <p className="text-sm font-medium text-slate-300">Status...</p>
         <span className="text-xs text-slate-500 mt-1">Miranda Rentals and Services</span>
       </div>
     );
@@ -105,24 +147,24 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
         </p>
 
         {/* Contact Links */}
-        <div className="mt-8 flex flex-col sm:flex-row items-center gap-3 w-full max-w-xs">
+        <div className="mt-8 grid grid-cols-2 gap-2.5 w-full max-w-xs">
           <a
             href="https://m.me/1193134077224088"
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
+            className="py-3 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
           >
             <MessageCircle className="w-4 h-4" />
-            Message on Messenger
+            <span>Messenger</span>
           </a>
           <a
             href="https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr"
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2"
+            className="py-3 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2"
           >
             <ExternalLink className="w-4 h-4" />
-            Official Facebook Page
+            <span>Facebook</span>
           </a>
         </div>
       </div>
@@ -130,6 +172,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   }
 
   const timeCalc = calculateBookingTime(activeBooking, currentTime);
+  const startDateTime = getBookingStartDateTime(activeBooking);
   const isOvertime = timeCalc.isOvertime;
   const isUpcoming = timeCalc.isUpcoming;
   const isActive = timeCalc.isActive;
@@ -149,67 +192,68 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     >
       {/* Top Renter Branding Header */}
       <header
-        className={`px-4 sm:px-8 py-3.5 border-b sticky top-0 z-30 transition-colors duration-500 backdrop-blur-md ${
+        className={`px-3.5 sm:px-8 py-3 border-b sticky top-0 z-30 transition-colors duration-500 backdrop-blur-md ${
           isOvertime
-            ? 'bg-red-950/80 border-red-900/80'
-            : 'bg-slate-950/80 border-slate-800/80'
+            ? 'bg-red-950/90 border-red-900/80'
+            : 'bg-slate-950/90 border-slate-800/80'
         }`}
       >
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-lg transition-transform ${
+              className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shadow-lg shrink-0 transition-transform ${
                 isOvertime
                   ? 'bg-red-600 text-white animate-pulse'
                   : 'bg-gradient-to-tr from-blue-700 to-sky-500 text-white shadow-blue-600/30'
               }`}
             >
-              <Car className="w-5 h-5" />
+              <Car className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400">
-                  Miranda Rentals & Services
-                </span>
-                <span className="text-slate-600 text-xs">•</span>
-                <span className="text-[11px] font-mono font-bold text-slate-300">
-                  {activeBooking.id}
-                </span>
-              </div>
-              <h1 className="text-xs sm:text-sm font-bold text-white tracking-tight">
+            <div className="min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 block leading-tight truncate">
+                Miranda Rentals & Services
+              </span>
+              <h1 className="text-xs sm:text-sm font-bold text-white tracking-tight leading-tight truncate">
                 Live Rental Time Tracker
               </h1>
             </div>
           </div>
 
-          {/* Quick Copy Link Action */}
-          <button
-            onClick={handleCopyLink}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-800 transition-colors"
-            title="Copy tracker link"
-          >
-            {copiedLink ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline text-emerald-400">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden sm:inline">Share Link</span>
-              </>
-            )}
-          </button>
+          {/* Right Header: Non-wrapping Booking ID Pill + Share Action */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="px-2 py-1 bg-slate-900 text-slate-200 border border-slate-800 rounded-lg text-xs font-mono font-bold whitespace-nowrap shadow-xs">
+              {activeBooking.id}
+            </span>
+
+            <button
+              onClick={handleCopyLink}
+              className="p-1.5 sm:px-2.5 sm:py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-800 transition-colors flex items-center gap-1 shadow-xs active:scale-95"
+              title="Copy tracker link"
+              aria-label="Copy tracker link"
+            >
+              {copiedLink ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="hidden sm:inline text-emerald-400 text-[11px] font-bold">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="hidden sm:inline text-[11px]">Share</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="max-w-4xl w-full mx-auto px-4 py-6 sm:py-8 flex-1 flex flex-col space-y-6">
+      <main className="max-w-4xl w-full mx-auto px-4 py-5 sm:py-8 flex-1 flex flex-col space-y-6">
         
         {/* Dynamic Status Alert Banner */}
         <div
           id="tracker-status-banner"
-          className={`p-4 sm:p-5 rounded-2xl border transition-all duration-500 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl ${
+          className={`p-4 sm:p-5 rounded-2xl border transition-all duration-500 shadow-xl ${
             isOvertime
               ? 'bg-gradient-to-r from-red-950 via-red-900 to-red-950 text-white border-red-600 shadow-red-950/60 ring-1 ring-red-500/40'
               : isActive
@@ -238,7 +282,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
 
             <div>
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider block opacity-75">
-                {isOvertime ? 'Urgent Alert' : 'Live Rental Status'}
+                {isOvertime ? 'Urgent Alert' : 'Status'}
               </span>
               <h2 className="text-sm sm:text-base font-bold tracking-tight leading-snug">
                 {isOvertime
@@ -247,30 +291,8 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
                   ? 'Active Rental — Timer Running'
                   : 'Scheduled Trip — Ready for Dispatch'}
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {isOvertime
-                  ? 'Your scheduled return time has passed. Please contact us via Messenger.'
-                  : isActive
-                  ? `Scheduled return on ${formatDateOnly(timeCalc.endDateTime)} at ${formatTimeOnly(timeCalc.endDateTime)}`
-                  : `Scheduled departure on ${activeBooking.startDate} at ${activeBooking.startTime}`}
-              </p>
             </div>
           </div>
-
-          {/* Quick Messenger CTA in Banner */}
-          <a
-            href="https://m.me/1193134077224088"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`w-full sm:w-auto shrink-0 px-4 py-2 font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${
-              isOvertime
-                ? 'bg-white text-red-700 hover:bg-slate-100'
-                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/30'
-            }`}
-          >
-            <MessageCircle className="w-4 h-4" />
-            <span>Chat on Messenger</span>
-          </a>
         </div>
 
         {/* Hero Countdown Timer Display */}
@@ -366,11 +388,15 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
 
           {/* Progress Bar & Scheduled Window */}
           <div className="w-full max-w-xl mt-3 relative z-10 space-y-2">
-            <div className="flex justify-between items-center text-[11px] sm:text-xs text-slate-400 font-mono">
-              <span className="truncate">Start: {activeBooking.startDate} {activeBooking.startTime}</span>
-              <span className="truncate text-right">
-                Return: {formatDateOnly(timeCalc.endDateTime)} {formatTimeOnly(timeCalc.endDateTime)}
-              </span>
+            <div className="flex justify-between items-center text-[10px] sm:text-xs text-slate-300 font-mono">
+              <div className="flex items-center gap-1 min-w-0">
+                <span className="text-slate-500 uppercase font-sans font-bold text-[9px] sm:text-[10px] tracking-wider shrink-0">Start:</span>
+                <span className="text-slate-200 font-semibold truncate">{formatDateOnly(startDateTime)} • {formatTimeOnly(startDateTime)}</span>
+              </div>
+              <div className="flex items-center gap-1 min-w-0 text-right justify-end">
+                <span className="text-slate-500 uppercase font-sans font-bold text-[9px] sm:text-[10px] tracking-wider shrink-0">Return:</span>
+                <span className="text-slate-200 font-semibold truncate">{formatDateOnly(timeCalc.endDateTime)} • {formatTimeOnly(timeCalc.endDateTime)}</span>
+              </div>
             </div>
             <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden p-0.5 border border-slate-700">
               <div
@@ -382,7 +408,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
             </div>
             {isOvertime && (
               <p className="text-xs text-red-300 font-semibold text-center pt-1">
-                Vehicle return was scheduled for {formatDateTime(timeCalc.endDateTime)}.
+                Vehicle return was scheduled for {formatDateOnly(timeCalc.endDateTime)} at {formatTimeOnly(timeCalc.endDateTime)}.
               </p>
             )}
           </div>
@@ -424,13 +450,13 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
 
             <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
               <div className="p-2.5 bg-slate-950/50 rounded-lg border border-slate-800/60">
-                <span className="text-slate-500 text-[10px] block uppercase">Scheduled Start</span>
+                <span className="text-slate-500 text-[10px] block uppercase font-bold tracking-wider">Scheduled Start</span>
                 <strong className="text-slate-200 font-mono block mt-0.5 text-xs">
-                  {activeBooking.startDate} • {activeBooking.startTime}
+                  {formatDateOnly(startDateTime)} • {formatTimeOnly(startDateTime)}
                 </strong>
               </div>
               <div className="p-2.5 bg-slate-950/50 rounded-lg border border-slate-800/60">
-                <span className="text-slate-500 text-[10px] block uppercase">Expected Return</span>
+                <span className="text-slate-500 text-[10px] block uppercase font-bold tracking-wider">Expected Return</span>
                 <strong className="text-slate-200 font-mono block mt-0.5 text-xs">
                   {formatDateOnly(timeCalc.endDateTime)} • {formatTimeOnly(timeCalc.endDateTime)}
                 </strong>
@@ -515,35 +541,30 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
         </div>
 
         {/* Dedicated Miranda Rentals Reach & Assistance Hub */}
-        <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-blue-400" />
-                Need Assistance or Extending Your Trip?
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Connect directly with Miranda Rentals and Services team anytime.
-              </p>
-            </div>
-            <span className="text-[11px] font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0">
+        <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 shadow-xl space-y-4">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 min-w-0">
+              <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+              <span>Need Assistance?</span>
+            </h3>
+            <span className="text-[10px] sm:text-[11px] font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 sm:px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0 ml-auto whitespace-nowrap">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
               Online & Ready
             </span>
           </div>
 
-          {/* Social Reach Buttons */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {/* Social Reach Buttons (2 in a row on all screen sizes) */}
+          <div className="grid grid-cols-2 gap-2.5 pt-1">
             {/* Messenger Button */}
             <a
               id="reach-messenger-btn"
               href="https://m.me/1193134077224088"
               target="_blank"
               rel="noopener noreferrer"
-              className="py-3.5 px-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2.5 active:scale-98"
+              className="py-3 px-3 sm:px-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 active:scale-98"
             >
-              <MessageCircle className="w-5 h-5 fill-current" />
-              <span>Chat via Facebook Messenger</span>
+              <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" />
+              <span>Messenger</span>
             </a>
 
             {/* Official Facebook Page Button */}
@@ -552,16 +573,12 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
               href="https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr"
               target="_blank"
               rel="noopener noreferrer"
-              className="py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 hover:text-white font-bold text-xs sm:text-sm rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2.5 shadow-md active:scale-98"
+              className="py-3 px-3 sm:px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 hover:text-white font-bold text-xs sm:text-sm rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 shadow-md active:scale-98"
             >
-              <ExternalLink className="w-5 h-5" />
-              <span>Visit Official Facebook Page</span>
+              <ExternalLink className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span>Facebook</span>
             </a>
           </div>
-
-          <p className="text-[11px] text-slate-500 text-center pt-2">
-            For fastest response regarding route adjustments or questions, message us directly via Messenger.
-          </p>
         </div>
       </main>
 

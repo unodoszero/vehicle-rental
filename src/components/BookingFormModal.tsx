@@ -4,7 +4,7 @@ import {
   ShieldCheck, FileText, AlertCircle, Info, Sparkles, Hash
 } from 'lucide-react';
 import { Booking, VehicleType } from '../types';
-import { generateBookingId, getRandomColorTag } from '../utils/storage';
+import { generateBookingId, getRandomColorTag, generateTrackingToken } from '../utils/storage';
 import { getBookingStartDateTime, getBookingEndDateTime, formatDateTime, toISODateString } from '../utils/dateUtils';
 
 interface BookingFormModalProps {
@@ -173,6 +173,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       noOfDays: Number(noOfDays),
       notes: notes.trim() || undefined,
       colorTag,
+      trackingToken: editingBooking?.trackingToken || generateTrackingToken(),
       createdAt: editingBooking ? editingBooking.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

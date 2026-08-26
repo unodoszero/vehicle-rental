@@ -9,7 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
-import { loadBookings, saveBookings } from './storage';
+import { loadBookings, saveBookings, generateTrackingToken } from './storage';
 
 const BOOKINGS_COLLECTION = 'bookings';
 
@@ -41,6 +41,7 @@ export function subscribeToBookings(
         list.push({
           ...data,
           id: data.id || docSnap.id,
+          trackingToken: data.trackingToken || generateTrackingToken(),
         });
       });
 

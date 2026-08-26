@@ -7,9 +7,11 @@ import { BookingDetailsDrawer } from './components/BookingDetailsDrawer';
 import { ConflictWarningModal } from './components/ConflictWarningModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { RenterTrackerView } from './components/RenterTrackerView';
+import { AdminLockScreen } from './components/AdminLockScreen';
+import { ChangePinModal } from './components/ChangePinModal';
 import { ToastProvider, useToast } from './components/Toast';
 import { Booking, VehicleType } from './types';
-import { loadBookings } from './utils/storage';
+import { loadBookings, isAdminSessionActive, setAdminSessionActive } from './utils/storage';
 import { 
   subscribeToBookings, 
   saveBookingToFirestore, 
@@ -25,6 +27,10 @@ function MainApp() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  // Security: Admin Authentication Gate
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => isAdminSessionActive());
+  const [isChangePinModalOpen, setIsChangePinModalOpen] = useState(false);
 
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
@@ -198,11 +204,27 @@ function MainApp() {
 
   // If in public Renter Live Tracker view:
   if (activeTrackerId) {
-    const activeBooking = bookings.find((b) => b.id === activeTrackerId) || null;
+    const activeBooking = bookings.find((b) => b.id === activeTrackerId || b.trackingToken === activeTrackerId) || null;
     return (
       <RenterTrackerView
         booking={activeBooking}
         bookingId={activeTrackerId}
+      />
+    );
+  }
+
+  // Security Gate: Protect admin dashboard with PIN passkey
+  if (!isAdminUnlocked) {
+    return (
+      <AdminLockScreen
+        onUnlock={() => {
+          setAdminSessionActive(true);
+          setIsAdminUnlocked(true);
+          showToast('Admin Console Unlocked', 'Welcome to Miranda Rentals Fleet Management', 'success');
+        }}
+        onLookupTracker={(trackerKey) => {
+          handleOpenTracker(trackerKey);
+        }}
       />
     );
   }
@@ -217,6 +239,12 @@ function MainApp() {
         onOpenTracker={handleOpenTracker}
         isPublicTrackerView={false}
         isOnline={isOnline}
+        onLockAdmin={() => {
+          setAdminSessionActive(false);
+          setIsAdminUnlocked(false);
+          showToast('Admin Session Locked', 'You have securely locked the admin console.', 'info');
+        }}
+        onOpenChangePin={() => setIsChangePinModalOpen(true)}
       />
 
       {/* Main Admin Dashboard Container */}
@@ -282,6 +310,12 @@ function MainApp() {
           setIsDeleteModalOpen(false);
           setBookingToDelete(null);
         }}
+      />
+
+      {/* Change Admin PIN Modal */}
+      <ChangePinModal
+        isOpen={isChangePinModalOpen}
+        onClose={() => setIsChangePinModalOpen(false)}
       />
     </div>
   );

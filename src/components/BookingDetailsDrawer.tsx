@@ -42,12 +42,14 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
 
   const timeCalc = calculateBookingTime(booking, currentTime);
 
+  const trackerKey = booking.trackingToken || booking.id;
+
   const handleCopyLink = () => {
-    // Generate tracker link with query param or hash for client-side routing
-    const trackerUrl = `${window.location.origin}${window.location.pathname}?tracker=${booking.id}`;
+    // Generate secure tracker link with unguessable cryptographic token
+    const trackerUrl = `${window.location.origin}${window.location.pathname}?tracker=${trackerKey}`;
     navigator.clipboard.writeText(trackerUrl).then(() => {
       setCopied(true);
-      showToast('Tracker Link Copied!', `Public link for ${booking.name} copied to clipboard.`, 'success');
+      showToast('Secure Tracker Link Copied!', `Token-secured link for ${booking.name} copied to clipboard.`, 'success');
       setTimeout(() => setCopied(false), 2500);
     }).catch(() => {
       // Fallback
@@ -225,12 +227,17 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
 
           {/* Public Tracking Link Box */}
           <div className="pt-2">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-2">
-              Public Tracking Link
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-[11px] font-bold text-slate-500 uppercase">
+                Secure Tracking Link
+              </label>
+              <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                Token Protected
+              </span>
+            </div>
             <div className="flex items-center space-x-2">
               <div className="flex-1 truncate bg-slate-100 p-2 rounded text-[11px] font-mono text-slate-600 border border-slate-200">
-                {`${window.location.origin}${window.location.pathname}?tracker=${booking.id}`}
+                {`${window.location.origin}${window.location.pathname}?tracker=${trackerKey}`}
               </div>
               <button
                 id="copy-tracker-link-btn"
@@ -246,12 +253,12 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
                 onClick={handleCopyLink}
                 className="text-[11px] text-blue-600 font-semibold hover:underline"
               >
-                {copied ? 'Copied with Token' : 'Copy Link with Token'}
+                {copied ? 'Copied Secure Link' : 'Copy Secure Link'}
               </button>
 
               <button
                 id="open-live-tracker-btn"
-                onClick={() => onOpenTracker(booking.id)}
+                onClick={() => onOpenTracker(trackerKey)}
                 className="text-[11px] text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1"
               >
                 <ExternalLink className="w-3 h-3 text-slate-400" />

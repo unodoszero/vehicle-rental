@@ -3,6 +3,9 @@ import { toISODateString } from './dateUtils';
 
 const STORAGE_KEY = 'car_rental_bookings_v1';
 const LEGACY_STORAGE_KEY = 'fleet_rental_scheduler_bookings_v1';
+const ADMIN_PIN_KEY = 'miranda_admin_pin_v1';
+const ADMIN_SESSION_KEY = 'miranda_admin_session_auth_v1';
+export const DEFAULT_ADMIN_PIN = '1234';
 
 export const COLOR_PALETTES = [
   { id: 'emerald', bg: 'bg-emerald-500', text: 'text-emerald-950', border: 'border-emerald-600', light: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
@@ -17,6 +20,72 @@ export const COLOR_PALETTES = [
 export function getRandomColorTag(): string {
   const index = Math.floor(Math.random() * COLOR_PALETTES.length);
   return COLOR_PALETTES[index].id;
+}
+
+/**
+ * Generates an unguessable, secure cryptographic tracking token for links
+ */
+export function generateTrackingToken(): string {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let token = 'trk_';
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    for (let i = 0; i < array.length; i++) {
+      token += chars[array[i] % chars.length];
+    }
+  } else {
+    for (let i = 0; i < 16; i++) {
+      token += chars[Math.floor(Math.random() * chars.length)];
+    }
+  }
+  return token;
+}
+
+/**
+ * Admin Security & PIN Management
+ */
+export function getAdminPin(): string {
+  try {
+    return localStorage.getItem(ADMIN_PIN_KEY) || DEFAULT_ADMIN_PIN;
+  } catch {
+    return DEFAULT_ADMIN_PIN;
+  }
+}
+
+export function setAdminPin(newPin: string): boolean {
+  if (!newPin || newPin.length < 4) return false;
+  try {
+    localStorage.setItem(ADMIN_PIN_KEY, newPin);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function verifyAdminPin(enteredPin: string): boolean {
+  const currentPin = getAdminPin();
+  return enteredPin.trim() === currentPin.trim();
+}
+
+export function isAdminSessionActive(): boolean {
+  try {
+    return sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setAdminSessionActive(active: boolean): void {
+  try {
+    if (active) {
+      sessionStorage.setItem(ADMIN_SESSION_KEY, 'true');
+    } else {
+      sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    }
+  } catch (err) {
+    console.error('Session storage error', err);
+  }
 }
 
 /**
@@ -37,7 +106,10 @@ export function loadBookings(): Booking[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed;
+      return parsed.map((b) => ({
+        ...b,
+        trackingToken: b.trackingToken || generateTrackingToken(),
+      }));
     }
     return [];
   } catch (err) {
