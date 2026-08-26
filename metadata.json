@@ -1,0 +1,8 @@
+{
+  "name": "Miranda Rentals and Services",
+  "description": "Car and van rental operations scheduler with admin booking management, monthly multi-day calendar, conflict validation, and public renter live time tracker with overtime alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
