@@ -4,19 +4,25 @@ import {
   Calendar, CheckCircle2, Navigation, ArrowLeft, RefreshCw, 
   User, Info, AlertOctagon, HelpCircle, ArrowRight
 } from 'lucide-react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
 import { Booking } from '../types';
 import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly } from '../utils/dateUtils';
 
 interface RenterTrackerViewProps {
   booking: Booking | null;
+  bookingId?: string | null;
   onBackToAdmin?: () => void;
 }
 
 export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   booking,
+  bookingId,
   onBackToAdmin,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [remoteBooking, setRemoteBooking] = useState<Booking | null>(booking);
+  const [isLoading, setIsLoading] = useState(!booking && !!bookingId);
 
   // Precision 1-second interval ticker
   useEffect(() => {
@@ -26,7 +32,50 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  if (!booking) {
+  // Fetch or subscribe from Firestore if not in local memory
+  useEffect(() => {
+    if (booking) {
+      setRemoteBooking(booking);
+      setIsLoading(false);
+      return;
+    }
+    if (!bookingId) {
+      setIsLoading(false);
+      return;
+    }
+
+    const docRef = doc(db, 'bookings', bookingId);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setRemoteBooking(docSnap.data() as Booking);
+        } else {
+          setRemoteBooking(null);
+        }
+        setIsLoading(false);
+      },
+      (err) => {
+        console.warn('Error fetching booking tracker document:', err);
+        setIsLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [booking, bookingId]);
+
+  const activeBooking = remoteBooking || booking;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="text-sm font-medium text-slate-300">Loading Live Rental Status...</p>
+      </div>
+    );
+  }
+
+  if (!activeBooking) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
         <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-4">
@@ -49,7 +98,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     );
   }
 
-  const timeCalc = calculateBookingTime(booking, currentTime);
+  const timeCalc = calculateBookingTime(activeBooking, currentTime);
   const isOvertime = timeCalc.isOvertime;
   const isUpcoming = timeCalc.isUpcoming;
   const isActive = timeCalc.isActive;
@@ -88,11 +137,11 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
               </span>
               <span className="text-slate-500 text-xs">•</span>
               <span className="text-xs font-mono font-semibold text-slate-300">
-                {booking.id}
+                {activeBooking.id}
               </span>
             </div>
             <h1 className="text-sm font-bold text-white tracking-tight">
-              {booking.vehicleModel || `${booking.vehicle} Rental`}
+              {activeBooking.vehicleModel || `${activeBooking.vehicle} Rental`}
             </h1>
           </div>
         </div>
@@ -261,7 +310,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
           {/* Progress Bar */}
           <div className="w-full max-w-xl mt-3 relative z-10">
             <div className="flex justify-between text-[11px] text-slate-400 mb-1 font-mono">
-              <span>Start: {booking.startDate} {booking.startTime}</span>
+              <span>Start: {activeBooking.startDate} {activeBooking.startTime}</span>
               <span>
                 Return: {formatDateOnly(timeCalc.endDateTime)} {formatTimeOnly(timeCalc.endDateTime)}
               </span>
@@ -298,23 +347,23 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
             <div className="space-y-2 text-xs">
               <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
                 <span className="text-slate-400 text-[10px] block uppercase font-mono">Pickup Hub</span>
-                <span className="font-semibold text-white text-xs block mt-0.5">{booking.startLocation}</span>
+                <span className="font-semibold text-white text-xs block mt-0.5">{activeBooking.startLocation}</span>
               </div>
 
               <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
                 <span className="text-slate-400 text-[10px] block uppercase font-mono">Return Destination</span>
-                <span className="font-semibold text-white text-xs block mt-0.5">{booking.destination}</span>
+                <span className="font-semibold text-white text-xs block mt-0.5">{activeBooking.destination}</span>
               </div>
             </div>
 
             <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
               <span className="text-slate-400">Total Duration:</span>
-              <strong className="text-white font-mono">{booking.noOfDays} Day{booking.noOfDays > 1 ? 's' : ''} ({booking.noOfDays * 24} hrs)</strong>
+              <strong className="text-white font-mono">{activeBooking.noOfDays} Day{activeBooking.noOfDays > 1 ? 's' : ''} ({activeBooking.noOfDays * 24} hrs)</strong>
             </div>
 
             <div className="flex items-center justify-between text-xs">
               <span className="text-slate-400">Passenger Capacity:</span>
-              <strong className="text-white">{booking.passengers} Passengers</strong>
+              <strong className="text-white">{activeBooking.passengers} Passengers</strong>
             </div>
           </div>
 
@@ -332,14 +381,14 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">Assigned Vehicle:</span>
-                <strong className="text-white">{booking.vehicle} ({booking.vehicleModel || 'Standard'})</strong>
+                <strong className="text-white">{activeBooking.vehicle} ({activeBooking.vehicleModel || 'Standard'})</strong>
               </div>
 
-              {booking.plateNumber && (
+              {activeBooking.plateNumber && (
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">License Plate:</span>
                   <span className="font-mono bg-slate-800 px-2 py-0.5 rounded text-white font-bold text-[11px] border border-slate-700">
-                    {booking.plateNumber}
+                    {activeBooking.plateNumber}
                   </span>
                 </div>
               )}
@@ -347,30 +396,30 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">Driver Mode:</span>
                 <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
-                  booking.selfDrive
+                  activeBooking.selfDrive
                     ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
                     : 'bg-blue-400/20 text-blue-300 border border-blue-400/30'
                 }`}>
-                  {booking.selfDrive ? 'Self-Drive (Authorized Driver)' : 'Company Chauffeur Included'}
+                  {activeBooking.selfDrive ? 'Self-Drive (Authorized Driver)' : 'Company Chauffeur Included'}
                 </span>
               </div>
 
-              {booking.selfDrive && booking.driversLicenseDetails && (
+              {activeBooking.selfDrive && activeBooking.driversLicenseDetails && (
                 <div className="p-2 bg-slate-950/60 rounded-lg border border-slate-800 mt-2">
                   <span className="text-[10px] text-slate-400 block uppercase font-mono">Driver License File</span>
-                  <span className="text-[11px] text-slate-200 font-mono">{booking.driversLicenseDetails}</span>
+                  <span className="text-[11px] text-slate-200 font-mono">{activeBooking.driversLicenseDetails}</span>
                 </div>
               )}
             </div>
 
             <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
               <span className="text-slate-400">Reserved For:</span>
-              <strong className="text-white">{booking.name}</strong>
+              <strong className="text-white">{activeBooking.name}</strong>
             </div>
 
             <div className="flex items-center justify-between text-xs">
               <span className="text-slate-400">Customer Mobile:</span>
-              <span className="font-mono text-slate-300">{booking.mobileNo}</span>
+              <span className="font-mono text-slate-300">{activeBooking.mobileNo}</span>
             </div>
           </div>
         </div>
@@ -410,3 +459,4 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     </div>
   );
 };
+

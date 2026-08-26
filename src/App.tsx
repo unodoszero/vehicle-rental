@@ -9,7 +9,13 @@ import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { RenterTrackerView } from './components/RenterTrackerView';
 import { ToastProvider, useToast } from './components/Toast';
 import { Booking, VehicleType } from './types';
-import { loadBookings, saveBookings, resetToSeedData } from './utils/storage';
+import { loadBookings } from './utils/storage';
+import { 
+  subscribeToBookings, 
+  saveBookingToFirestore, 
+  deleteBookingFromFirestore, 
+  clearAllBookingsFromFirestore 
+} from './utils/firebaseBookings';
 import { checkBookingConflicts } from './utils/dateUtils';
 
 function MainApp() {
@@ -18,6 +24,7 @@ function MainApp() {
   const [bookings, setBookings] = useState<Booking[]>(() => loadBookings());
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
@@ -39,6 +46,25 @@ function MainApp() {
   // Active public tracker route detection (from URL query ?tracker=ID or #tracker=ID)
   const [activeTrackerId, setActiveTrackerId] = useState<string | null>(null);
 
+  // Real-time Firestore sync & offline cache subscription
+  useEffect(() => {
+    const unsubscribe = subscribeToBookings((updatedBookings, isFromCache) => {
+      setBookings(updatedBookings);
+    });
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Check URL query on mount and on popstate
   useEffect(() => {
     const parseUrl = () => {
@@ -59,12 +85,6 @@ function MainApp() {
     parseUrl();
     window.addEventListener('popstate', parseUrl);
     return () => window.removeEventListener('popstate', parseUrl);
-  }, []);
-
-  // Sync bookings to localStorage
-  const updateBookings = useCallback((newBookings: Booking[]) => {
-    setBookings(newBookings);
-    saveBookings(newBookings);
   }, []);
 
   // Handle open tracker public view
@@ -100,18 +120,22 @@ function MainApp() {
   };
 
   // Confirm delete booking
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!bookingToDelete) return;
-    const nextBookings = bookings.filter((b) => b.id !== bookingToDelete.id);
-    updateBookings(nextBookings);
-    setIsDeleteModalOpen(false);
-    setIsDrawerOpen(false);
-    setSelectedBooking(null);
-    showToast('Booking Deleted', `Reservation ${bookingToDelete.id} for ${bookingToDelete.name} was removed.`, 'info');
+    try {
+      await deleteBookingFromFirestore(bookingToDelete.id);
+      setIsDeleteModalOpen(false);
+      setIsDrawerOpen(false);
+      setSelectedBooking(null);
+      showToast('Booking Deleted', `Reservation ${bookingToDelete.id} for ${bookingToDelete.name} was removed.`, 'info');
+    } catch (err) {
+      console.error('Failed to delete booking from Firestore', err);
+      showToast('Delete Error', 'Could not delete booking from database.', 'error');
+    }
   };
 
   // Submit booking from form (with conflict check)
-  const handleFormSubmit = (bookingData: Booking, isOverride: boolean = false) => {
+  const handleFormSubmit = async (bookingData: Booking, isOverride: boolean = false) => {
     if (!isOverride) {
       const conflictCheck = checkBookingConflicts(bookingData, bookings, true);
       if (conflictCheck.hasConflict) {
@@ -122,24 +146,25 @@ function MainApp() {
       }
     }
 
-    // Save booking (new or edit)
-    let nextBookings: Booking[];
-    if (editingBooking) {
-      nextBookings = bookings.map((b) => (b.id === bookingData.id ? bookingData : b));
-      showToast('Booking Updated', `Changes to reservation ${bookingData.id} saved successfully.`, 'success');
-    } else {
-      nextBookings = [bookingData, ...bookings];
-      showToast('Booking Created', `New reservation ${bookingData.id} for ${bookingData.name} added to schedule.`, 'success');
-    }
+    try {
+      await saveBookingToFirestore(bookingData);
 
-    updateBookings(nextBookings);
-    setIsFormModalOpen(false);
-    setIsConflictModalOpen(false);
-    setPendingBookingToSave(null);
+      if (editingBooking) {
+        showToast('Booking Updated', `Changes to reservation ${bookingData.id} saved to Cloud & Local Cache.`, 'success');
+      } else {
+        showToast('Booking Created', `New reservation ${bookingData.id} for ${bookingData.name} saved to Cloud & Local Cache.`, 'success');
+      }
 
-    // If drawer was open for this booking, refresh selection
-    if (selectedBooking && selectedBooking.id === bookingData.id) {
-      setSelectedBooking(bookingData);
+      setIsFormModalOpen(false);
+      setIsConflictModalOpen(false);
+      setPendingBookingToSave(null);
+
+      if (selectedBooking && selectedBooking.id === bookingData.id) {
+        setSelectedBooking(bookingData);
+      }
+    } catch (err) {
+      console.error('Failed to save booking to Firestore', err);
+      showToast('Database Error', 'Could not save booking to Cloud.', 'error');
     }
   };
 
@@ -151,13 +176,17 @@ function MainApp() {
   };
 
   // Clear all bookings
-  const handleResetSeedData = () => {
-    if (confirm('Are you sure you want to clear all bookings from the schedule?')) {
-      const empty = resetToSeedData();
-      setBookings(empty);
-      setSelectedBooking(null);
-      setIsDrawerOpen(false);
-      showToast('All Bookings Cleared', 'The schedule has been cleared of all reservations.', 'info');
+  const handleResetSeedData = async () => {
+    if (confirm('Are you sure you want to clear all bookings from the database?')) {
+      try {
+        await clearAllBookingsFromFirestore();
+        setSelectedBooking(null);
+        setIsDrawerOpen(false);
+        showToast('All Bookings Cleared', 'The schedule has been cleared from Cloud and Local storage.', 'info');
+      } catch (err) {
+        console.error('Failed to clear bookings', err);
+        showToast('Clear Error', 'Failed to clear cloud database.', 'error');
+      }
     }
   };
 
@@ -187,6 +216,7 @@ function MainApp() {
         bookings={bookings}
         onOpenTracker={handleOpenTracker}
         isPublicTrackerView={false}
+        isOnline={isOnline}
       />
 
       {/* Main Admin Dashboard Container */}
@@ -264,3 +294,4 @@ export default function App() {
     </ToastProvider>
   );
 }
+

@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /bookings/{bookingId} {
+      // Allow read for admin and public live renter tracking links
+      allow read: if true;
+      // Allow write for scheduling and managing bookings
+      allow write: if true;
+    }
+  }
+}
