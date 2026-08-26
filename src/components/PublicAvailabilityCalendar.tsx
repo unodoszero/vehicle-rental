@@ -1,15 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  Car, Calendar, ShieldCheck, ChevronLeft, ChevronRight, 
-  CheckCircle2, Clock, MessageCircle, ExternalLink, Copy, Check,
-  FileText, Fuel, CreditCard, MapPin, Phone, Sparkles, Filter,
-  Lock, Search, Share2, Info
+  Car, ChevronLeft, ChevronRight, 
+  MessageCircle, ExternalLink, Copy, Check,
+  FileText, Fuel, CreditCard, ShieldCheck, Filter,
+  Lock, Search, Share2, Facebook
 } from 'lucide-react';
 import { Booking, VehicleType } from '../types';
 import { 
   getMonthCalendarGrid, 
-  toISODateString, 
-  formatDateOnly, 
   getBookingStartDateTime, 
   getBookingEndDateTime 
 } from '../utils/dateUtils';
@@ -48,7 +46,6 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     return getMonthCalendarGrid(year, month);
   }, [year, month]);
 
-  // Next & Previous Month Handlers
   const handlePrevMonth = () => {
     setCurrentDate(new Date(year, month - 1, 1));
   };
@@ -61,15 +58,18 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     setCurrentDate(new Date());
   };
 
-  // Filter bookings based on vehicle category
+  // Filter bookings based on vehicle category (exclude cancelled bookings)
   const filteredBookings = useMemo(() => {
-    if (vehicleFilter === 'all') return bookings;
-    return bookings.filter((b) => b.vehicle === vehicleFilter);
+    const active = bookings.filter((b) => b.status !== 'Cancelled');
+    if (vehicleFilter === 'all') return active;
+    return active.filter((b) => b.vehicle === vehicleFilter);
   }, [bookings, vehicleFilter]);
 
   // Compute status for each day
+  // Rule: When a date has been booked, the last date (return/checkout day) is the only booked date that can be clicked for new booking.
   const getDayAvailability = (dateString: string) => {
-    const dayBookings = filteredBookings.filter((b) => {
+    const carBookings = filteredBookings.filter((b) => {
+      if (b.vehicle !== 'Car') return false;
       const targetDayStart = new Date(`${dateString}T00:00:00`).getTime();
       const targetDayEnd = new Date(`${dateString}T23:59:59.999`).getTime();
       const start = getBookingStartDateTime(b).getTime();
@@ -77,27 +77,54 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
       return start <= targetDayEnd && end >= targetDayStart;
     });
 
-    const carBooked = dayBookings.some((b) => b.vehicle === 'Car');
-    const vanBooked = dayBookings.some((b) => b.vehicle === 'Van');
+    const vanBookings = filteredBookings.filter((b) => {
+      if (b.vehicle !== 'Van') return false;
+      const targetDayStart = new Date(`${dateString}T00:00:00`).getTime();
+      const targetDayEnd = new Date(`${dateString}T23:59:59.999`).getTime();
+      const start = getBookingStartDateTime(b).getTime();
+      const end = getBookingEndDateTime(b).getTime();
+      return start <= targetDayEnd && end >= targetDayStart;
+    });
+
+    const carBooked = carBookings.length > 0;
+    const vanBooked = vanBookings.length > 0;
+
+    // A vehicle booking blocks the date if the date is BEFORE the booking's end date (i.e. start day or middle day)
+    const carIsBlocked = carBookings.some((b) => dateString < b.endDate);
+    const carIsLastDay = carBooked && !carIsBlocked;
+
+    const vanIsBlocked = vanBookings.some((b) => dateString < b.endDate);
+    const vanIsLastDay = vanBooked && !vanIsBlocked;
+
+    let isClickable = true;
+    if (vehicleFilter === 'Car') {
+      isClickable = !carIsBlocked; // Clickable if not booked, OR if it's the last day of booking
+    } else if (vehicleFilter === 'Van') {
+      isClickable = !vanIsBlocked; // Clickable if not booked, OR if it's the last day of booking
+    } else {
+      // 'all': Clickable if at least one vehicle category is available or on return day
+      isClickable = !carIsBlocked || !vanIsBlocked;
+    }
 
     return {
-      isBooked: dayBookings.length > 0,
+      isBooked: carBooked || vanBooked,
       carBooked,
       vanBooked,
-      bookingCount: dayBookings.length,
-      bookings: dayBookings,
+      carIsLastDay,
+      vanIsLastDay,
+      isClickable,
+      bookingCount: carBookings.length + vanBookings.length,
     };
   };
 
   // Date click logic
-  const handleDayClick = (dateString: string, isPast: boolean) => {
-    if (isPast) return;
+  const handleDayClick = (dateString: string, isPast: boolean, isClickable: boolean) => {
+    if (isPast || !isClickable) return;
 
     if (!selectedStartDate || (selectedStartDate && selectedEndDate)) {
       setSelectedStartDate(dateString);
       setSelectedEndDate(null);
     } else {
-      // If clicked earlier than start date, reset start
       if (dateString < selectedStartDate) {
         setSelectedStartDate(dateString);
         setSelectedEndDate(null);
@@ -107,7 +134,6 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     }
   };
 
-  // Calculation of selected days
   const selectedDurationDays = useMemo(() => {
     if (!selectedStartDate) return 0;
     if (!selectedEndDate) return 1;
@@ -121,14 +147,13 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
   const inquiryMessage = useMemo(() => {
     const vehicleText = vehicleFilter === 'all' ? 'Car / Van' : vehicleFilter;
     if (selectedStartDate && selectedEndDate) {
-      return `Hi Miranda Rentals! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} from ${selectedStartDate} to ${selectedEndDate} (${selectedDurationDays} days). Are these dates available for reservation?`;
+      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} from ${selectedStartDate} to ${selectedEndDate} (${selectedDurationDays} days). Are these dates available for reservation?`;
     } else if (selectedStartDate) {
-      return `Hi Miranda Rentals! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} starting on ${selectedStartDate}. Are these dates available for reservation?`;
+      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} starting on ${selectedStartDate}. Are these dates available for reservation?`;
     }
-    return `Hi Miranda Rentals! I would like to inquire about available dates for booking a ${vehicleText}.`;
+    return `Hi Miranda Rentals and Services! I would like to inquire about available dates for booking a ${vehicleText}.`;
   }, [selectedStartDate, selectedEndDate, selectedDurationDays, vehicleFilter]);
 
-  // Facebook & Messenger Direct Links
   const FB_PAGE_URL = 'https://www.facebook.com/mirandarentals';
   const MESSENGER_URL = `https://m.me/mirandarentals?text=${encodeURIComponent(inquiryMessage)}`;
 
@@ -146,46 +171,43 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
   };
 
   return (
-    <div id="public-availability-calendar-page" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
-      {/* Ambient background styling */}
-      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-6xl h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none -z-10" />
-      <div className="fixed bottom-0 right-0 w-96 h-96 bg-sky-600/10 rounded-full blur-3xl pointer-events-none -z-10" />
-
-      {/* Public Top Navbar */}
-      <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 py-3.5">
+    <div id="public-availability-calendar-page" className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+      
+      {/* Top Clean White Navbar */}
+      <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-8 py-3.5 shadow-xs">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
           {/* Brand */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-sky-500 flex items-center justify-center text-white shadow-lg shadow-blue-600/25 shrink-0">
-              <Car className="w-4 h-4" />
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shrink-0">
+              <Car className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 block leading-tight">
-                Miranda Rentals & Services
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 block leading-tight">
+                Miranda Rentals and Services
               </span>
-              <span className="text-xs sm:text-sm font-bold text-white tracking-tight leading-tight block">
-                Public Availability Calendar
+              <span className="text-sm font-bold text-slate-900 tracking-tight leading-tight block">
+                Calendar
               </span>
             </div>
           </div>
 
-          {/* Quick Action Links */}
+          {/* Action Links */}
           <div className="flex items-center gap-2">
             <button
               id="public-share-link-btn"
               type="button"
               onClick={handleShareCalendar}
-              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-300 hover:text-white transition-all flex items-center gap-1.5"
+              className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 transition-all flex items-center gap-1.5 shadow-xs"
               title="Copy Public Calendar URL"
             >
               {copiedShareLink ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden sm:inline text-emerald-300">Link Copied</span>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden sm:inline text-emerald-700">Link Copied</span>
                 </>
               ) : (
                 <>
-                  <Share2 className="w-3.5 h-3.5 text-slate-400" />
+                  <Share2 className="w-3.5 h-3.5 text-slate-500" />
                   <span className="hidden sm:inline">Share Calendar</span>
                 </>
               )}
@@ -196,9 +218,9 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                 id="public-open-tracker-btn"
                 type="button"
                 onClick={onOpenTrackerLookup}
-                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-300 hover:text-white transition-all flex items-center gap-1.5"
+                className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 transition-all flex items-center gap-1.5 shadow-xs"
               >
-                <Search className="w-3.5 h-3.5 text-sky-400" />
+                <Search className="w-3.5 h-3.5 text-blue-600" />
                 <span className="hidden sm:inline">Track Booking</span>
               </button>
             )}
@@ -208,139 +230,130 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                 id="public-open-admin-btn"
                 type="button"
                 onClick={onOpenAdminLogin}
-                className="px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 rounded-lg text-xs font-semibold text-blue-300 hover:text-white transition-all flex items-center gap-1.5"
+                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 shadow-xs"
               >
-                <Lock className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden sm:inline">Admin Login</span>
+                <Lock className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Admin Access</span>
               </button>
             )}
           </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
+      {/* Main Container */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         
-        {/* Banner with Operating Hours & Direct Channels */}
-        <div className="bg-gradient-to-r from-blue-950/60 via-slate-900/90 to-slate-900/90 border border-blue-800/40 rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
-          <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="space-y-1.5">
-              <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-blue-500/10 border border-blue-500/30 rounded-full text-[11px] font-semibold text-blue-300">
-                <Clock className="w-3.5 h-3.5 text-blue-400" />
-                <span>Operating Hours: 8:00 AM – 8:00 PM (Daily)</span>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                Check Vehicle Availability & Reserve Dates
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-                Browse our real-time calendar below to view reserved and open schedule slots. Select your target dates to inquire instantly via Messenger.
-              </p>
-            </div>
+        {/* Banner with Direct Channels */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+          <div className="space-y-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              Vehicle Schedule & Booking Availability
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
+              Check open dates on our calendar below. Select your target start and return dates to easily inquire and reserve via Facebook Messenger.
+            </p>
+          </div>
 
-            {/* Quick Contact Buttons */}
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <a
-                id="header-messenger-btn"
-                href={MESSENGER_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2"
-              >
-                <MessageCircle className="w-4 h-4" />
-                <span>Messenger</span>
-                <ExternalLink className="w-3 h-3 text-blue-200" />
-              </a>
+          {/* Symmetrical Contact Buttons (Equal width & height) */}
+          <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto shrink-0">
+            <a
+              id="header-messenger-btn"
+              href={MESSENGER_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-10 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 min-w-[130px]"
+            >
+              <MessageCircle className="w-4 h-4 shrink-0" />
+              <span>Messenger</span>
+              <ExternalLink className="w-3 h-3 text-blue-200 shrink-0" />
+            </a>
 
-              <a
-                id="header-fb-page-btn"
-                href={FB_PAGE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-bold rounded-xl transition-all flex items-center gap-2"
-              >
-                <Car className="w-4 h-4 text-sky-400" />
-                <span>FB Page</span>
-                <ExternalLink className="w-3 h-3 text-slate-400" />
-              </a>
-            </div>
+            <a
+              id="header-fb-page-btn"
+              href={FB_PAGE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-10 px-4 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 min-w-[130px]"
+            >
+              <Facebook className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>FB Page</span>
+              <ExternalLink className="w-3 h-3 text-slate-400 shrink-0" />
+            </a>
           </div>
         </div>
 
-        {/* Vehicle Filter & Calendar Toolbar */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-            {/* Filter by Vehicle Type (Car vs Van) */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Filter className="w-3.5 h-3.5 text-blue-400" />
-                <span>Filter Fleet:</span>
-              </span>
-              <div className="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-semibold">
+        {/* Calendar Section */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-sm space-y-5">
+          
+          {/* Top Controls Toolbar: Clean, Symmetrical & Fully Responsive */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
+            {/* Fleet Filter: Equal 3-column segmented button */}
+            <div className="w-full sm:w-auto">
+              <div className="grid grid-cols-3 p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-semibold h-10 items-center sm:min-w-[240px]">
                 <button
                   id="filter-all-fleet-btn"
                   type="button"
                   onClick={() => setVehicleFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`h-8 px-3 rounded-lg transition-all flex items-center justify-center text-center ${
                     vehicleFilter === 'all'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-white text-slate-900 shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900 font-medium'
                   }`}
                 >
-                  All Fleet
+                  All
                 </button>
                 <button
                   id="filter-car-btn"
                   type="button"
                   onClick={() => setVehicleFilter('Car')}
-                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  className={`h-8 px-3 rounded-lg transition-all flex items-center justify-center text-center ${
                     vehicleFilter === 'Car'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-white text-slate-900 shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900 font-medium'
                   }`}
                 >
-                  <Car className="w-3.5 h-3.5" />
-                  <span>Car</span>
+                  Car
                 </button>
                 <button
                   id="filter-van-btn"
                   type="button"
                   onClick={() => setVehicleFilter('Van')}
-                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  className={`h-8 px-3 rounded-lg transition-all flex items-center justify-center text-center ${
                     vehicleFilter === 'Van'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-white text-slate-900 shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900 font-medium'
                   }`}
                 >
-                  <span>🚐 Van</span>
+                  Van
                 </button>
               </div>
             </div>
 
-            {/* Month Nav Controls */}
-            <div className="flex items-center justify-between sm:justify-end gap-2">
+            {/* Month Navigation Controls: Equal heights & perfectly aligned */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 type="button"
                 onClick={handleToday}
-                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-700"
+                className="h-10 px-4 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold border border-slate-300 shadow-xs transition-all shrink-0 flex items-center justify-center"
               >
                 Today
               </button>
-              <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1">
+              <div className="flex-1 sm:flex-initial flex items-center justify-between bg-slate-100 border border-slate-200 rounded-xl p-1 h-10 sm:min-w-[190px]">
                 <button
                   type="button"
                   onClick={handlePrevMonth}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+                  className="w-8 h-8 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-white rounded-lg transition-all shrink-0 shadow-2xs"
                   title="Previous Month"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="px-3 text-xs sm:text-sm font-bold text-white min-w-[130px] text-center">
+                <span className="px-2 text-xs sm:text-sm font-bold text-slate-900 text-center truncate select-none">
                   {monthName}
                 </span>
                 <button
                   type="button"
                   onClick={handleNextMonth}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+                  className="w-8 h-8 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-white rounded-lg transition-all shrink-0 shadow-2xs"
                   title="Next Month"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -349,30 +362,30 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
           </div>
 
-          {/* Availability Legends (Explicitly highlighted as requested) */}
-          <div className="flex flex-wrap items-center gap-3 sm:gap-6 pt-1 text-xs text-slate-300">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-emerald-500 shadow-xs shadow-emerald-500/50" />
-              <span className="font-semibold text-emerald-300">Available Date</span>
+          {/* Symmetrical Color Legends (Symmetric 4-part grid division) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-700">
+            <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100 shrink-0" />
+              <span className="font-semibold text-emerald-800 text-center truncate">Available Date</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-rose-500 shadow-xs shadow-rose-500/50" />
-              <span className="font-semibold text-rose-300">Booked / Reserved</span>
+            <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-100 shrink-0" />
+              <span className="font-semibold text-rose-800 text-center truncate">Booked / Reserved</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-amber-400 shadow-xs shadow-amber-400/50" />
-              <span className="font-semibold text-amber-300">Today</span>
+            <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-amber-100 shrink-0" />
+              <span className="font-semibold text-amber-800 text-center truncate">Today</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-500 shadow-xs shadow-blue-500/50" />
-              <span className="font-semibold text-blue-300">Your Selected Dates</span>
+            <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600 ring-2 ring-blue-100 shrink-0" />
+              <span className="font-semibold text-blue-800 text-center truncate">Selected Dates</span>
             </div>
           </div>
 
           {/* Calendar Grid */}
-          <div className="pt-2">
+          <div>
             {/* Weekday Headers */}
-            <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2 text-center text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2 text-center text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">
               <div>Sun</div>
               <div>Mon</div>
               <div>Tue</div>
@@ -382,7 +395,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
               <div>Sat</div>
             </div>
 
-            {/* Days Cells */}
+            {/* Calendar Days */}
             <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {calendarDays.map((day) => {
                 const dayStatus = getDayAvailability(day.dateString);
@@ -394,73 +407,78 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                   day.dateString >= selectedStartDate && 
                   day.dateString <= selectedEndDate;
 
-                // State determination
-                let bgClass = 'bg-slate-950/60 hover:bg-slate-800/80 border-slate-800/80';
-                let textClass = day.isCurrentMonth ? 'text-slate-200' : 'text-slate-600';
+                let bgClass = 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800 shadow-2xs';
+                let textClass = day.isCurrentMonth ? 'text-slate-800' : 'text-slate-300';
 
                 if (day.isPast) {
-                  bgClass = 'bg-slate-950/30 border-slate-900/60 opacity-40 cursor-not-allowed';
+                  bgClass = 'bg-slate-100/70 border-slate-200/60 opacity-50 cursor-not-allowed';
                 } else if (isInSelectedRange || isSelectedStart || isSelectedEnd) {
-                  bgClass = 'bg-blue-600/30 border-blue-500 ring-1 ring-blue-400 text-white';
+                  bgClass = 'bg-blue-50 border-blue-500 ring-2 ring-blue-500 text-blue-900';
+                } else if (!dayStatus.isClickable) {
+                  bgClass = 'bg-rose-50/60 border-rose-200 opacity-60 cursor-not-allowed';
                 } else if (dayStatus.isBooked) {
-                  bgClass = 'bg-rose-950/30 hover:bg-rose-950/50 border-rose-900/50';
+                  // The last day of booking is clickable for a new reservation
+                  bgClass = 'bg-white hover:bg-slate-50 border-amber-300 hover:border-blue-400 cursor-pointer shadow-xs';
                 } else if (day.isCurrentMonth) {
-                  bgClass = 'bg-slate-950/70 hover:bg-slate-800 border-slate-800 hover:border-emerald-500/50 cursor-pointer';
+                  bgClass = 'bg-white hover:bg-slate-50 border-slate-200 hover:border-blue-400 cursor-pointer';
                 }
 
                 return (
                   <button
                     key={day.dateString}
                     type="button"
-                    disabled={day.isPast}
-                    onClick={() => handleDayClick(day.dateString, day.isPast)}
-                    className={`min-h-[72px] sm:min-h-[90px] p-1.5 sm:p-2 rounded-xl border flex flex-col justify-between text-left transition-all relative overflow-hidden ${bgClass}`}
+                    disabled={day.isPast || !dayStatus.isClickable}
+                    onClick={() => handleDayClick(day.dateString, day.isPast, dayStatus.isClickable)}
+                    className={`min-h-[70px] sm:min-h-[88px] p-1.5 sm:p-2 rounded-xl border flex flex-col justify-between text-left transition-all relative overflow-hidden ${bgClass}`}
                   >
-                    {/* Top Row: Date number & Today Pill */}
+                    {/* Header: Clean Day number (Today pill removed to avoid clipping) */}
                     <div className="flex items-center justify-between">
                       <span
                         className={`text-xs sm:text-sm font-bold ${textClass} ${
-                          day.isToday ? 'text-amber-400' : ''
+                          day.isToday ? 'text-blue-600 ring-1 ring-blue-400 bg-blue-50 px-1.5 py-0.5 rounded-md' : ''
                         }`}
                       >
                         {day.dayOfMonth}
                       </span>
-                      {day.isToday && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                          Today
-                        </span>
-                      )}
                     </div>
 
-                    {/* Booking indicator status */}
+                    {/* Booking badge indicators */}
                     <div className="space-y-1 my-auto">
                       {dayStatus.isBooked ? (
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           {dayStatus.carBooked && (vehicleFilter === 'all' || vehicleFilter === 'Car') && (
-                            <div className="px-1 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] sm:text-[10px] font-bold flex items-center gap-1 truncate">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" />
-                              <span className="truncate">Car Booked</span>
+                            <div className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 truncate ${
+                              dayStatus.carIsLastDay 
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                                : 'bg-rose-100 text-rose-700 border border-rose-200'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dayStatus.carIsLastDay ? 'bg-amber-600' : 'bg-rose-600'}`} />
+                              <span className="truncate">{dayStatus.carIsLastDay ? 'Car Return' : 'Car Booked'}</span>
                             </div>
                           )}
                           {dayStatus.vanBooked && (vehicleFilter === 'all' || vehicleFilter === 'Van') && (
-                            <div className="px-1 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] sm:text-[10px] font-bold flex items-center gap-1 truncate">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" />
-                              <span className="truncate">Van Booked</span>
+                            <div className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 truncate ${
+                              dayStatus.vanIsLastDay 
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                                : 'bg-rose-100 text-rose-700 border border-rose-200'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dayStatus.vanIsLastDay ? 'bg-amber-600' : 'bg-rose-600'}`} />
+                              <span className="truncate">{dayStatus.vanIsLastDay ? 'Van Return' : 'Van Booked'}</span>
                             </div>
                           )}
                         </div>
                       ) : !day.isPast && day.isCurrentMonth ? (
-                        <div className="text-[9px] sm:text-[10px] text-emerald-400/80 font-medium flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        <div className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                           <span className="hidden sm:inline">Available</span>
                         </div>
                       ) : null}
                     </div>
 
-                    {/* Selection state marker */}
+                    {/* Selection status marker - compact Start/End for mobile */}
                     {(isSelectedStart || isSelectedEnd) && (
-                      <div className="text-[9px] font-bold text-blue-300 bg-blue-500/20 px-1 py-0.2 rounded border border-blue-400/30 text-center">
-                        {isSelectedStart && isSelectedEnd ? 'Selected Day' : isSelectedStart ? 'Start Date' : 'Return Date'}
+                      <div className="text-[9px] sm:text-[10px] font-bold text-blue-700 bg-blue-100/90 border border-blue-200 px-1 py-0.5 rounded text-center truncate shadow-2xs">
+                        {isSelectedStart && isSelectedEnd ? 'Start/End' : isSelectedStart ? 'Start' : 'End'}
                       </div>
                     )}
                   </button>
@@ -470,145 +488,134 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
           </div>
         </div>
 
-        {/* Selected Dates Booking & Instant Inquiry Box */}
-        <div className="bg-gradient-to-tr from-slate-900 to-slate-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl">
+        {/* Selected Dates Booking & Inquiry Box */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400 block">
-                Step 2: Instant Booking Inquiry
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 block">
+                Instant Booking Inquiry
               </span>
-              <h2 className="text-lg sm:text-xl font-bold text-white">
+              <h2 className="text-base sm:text-lg font-bold text-slate-900">
                 {selectedStartDate ? (
                   <span>
-                    Selected: <span className="text-blue-300 font-mono">{selectedStartDate}</span>
+                    Selected Dates: <span className="text-blue-600 font-mono">{selectedStartDate}</span>
                     {selectedEndDate && (
-                      <> to <span className="text-blue-300 font-mono">{selectedEndDate}</span> ({selectedDurationDays} Days)</>
+                      <> to <span className="text-blue-600 font-mono">{selectedEndDate}</span> ({selectedDurationDays} Days)</>
                     )}
                   </span>
                 ) : (
                   <span>Click on any available date above to start your reservation</span>
                 )}
               </h2>
-              <p className="text-xs text-slate-400 max-w-xl">
-                Ready to book? Send this inquiry directly to our official Messenger or copy the message to text our hotline.
+              <p className="text-xs text-slate-500">
+                Send your inquiry directly to our official Messenger or copy the message to text us.
               </p>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex flex-wrap items-center gap-2.5">
+            {/* Symmetrical Action Buttons (Inquire on messenger & copy text div) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full md:w-auto shrink-0">
               <a
                 id="messenger-inquire-cta-btn"
                 href={MESSENGER_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-5 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2"
+                className="h-11 px-5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 min-w-[180px]"
               >
-                <MessageCircle className="w-4 h-4" />
-                <span>Inquire via Messenger</span>
-                <ExternalLink className="w-3.5 h-3.5 text-blue-200" />
+                <MessageCircle className="w-4 h-4 shrink-0" />
+                <span>Inquire on Messenger</span>
+                <ExternalLink className="w-3.5 h-3.5 text-blue-200 shrink-0" />
               </a>
 
               <button
                 id="copy-inquiry-text-btn"
                 type="button"
                 onClick={handleCopyInquiry}
-                className="px-4 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs sm:text-sm rounded-xl transition-all flex items-center justify-center gap-2"
+                className="h-11 px-5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 min-w-[180px]"
               >
                 {copiedInquiry ? (
                   <>
-                    <Check className="w-4 h-4 text-emerald-400" />
-                    <span className="text-emerald-300">Copied to Clipboard!</span>
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="text-emerald-700">Copied!</span>
                   </>
                 ) : (
                   <>
-                    <Copy className="w-4 h-4 text-slate-400" />
-                    <span>Copy Inquiry Text</span>
+                    <Copy className="w-4 h-4 text-slate-500 shrink-0" />
+                    <span>Copy Text</span>
                   </>
                 )}
               </button>
             </div>
           </div>
 
-          {/* Pre-filled Message Preview Box */}
-          <div className="mt-4 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+          {/* Clean Message Box */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
               Message Preview:
             </span>
-            <p className="text-xs sm:text-sm font-mono text-slate-300 leading-relaxed italic">
+            <p className="text-xs sm:text-sm font-mono text-slate-700 leading-relaxed italic">
               "{inquiryMessage}"
             </p>
           </div>
         </div>
 
-        {/* Essential Rental Requirements (Mini Guide) */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+        {/* Essential Rental Requirements (Symmetrical 4-Card Grid) */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
               <FileText className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-white">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900">
                 Essential Rental Requirements & Guidelines
               </h3>
-              <p className="text-xs text-slate-400">
-                Please prepare the following documents upon reservation confirmation
+              <p className="text-xs text-slate-500">
+                Please prepare the following requirements upon reservation
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-2">
-            {/* Requirement 1 */}
-            <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-blue-400 text-xs font-bold">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-1">
+            {/* Card 1 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
                 <ShieldCheck className="w-4 h-4" />
-                <span>1. Valid Driver's License</span>
+                <span>1. Driver's License</span>
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Non-Professional or Professional Driver's License (Required for Self-Drive renters).
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Non-Pro or Professional Driver's License for self-drive rentals.
               </p>
             </div>
 
-            {/* Requirement 2 */}
-            <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-sky-400 text-xs font-bold">
+            {/* Card 2 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
                 <FileText className="w-4 h-4" />
-                <span>2. Government Valid ID</span>
+                <span>2. Valid Government ID</span>
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                At least 1 additional primary valid ID (Passport, UMID, SSS, PhilID, PRC, etc.).
+              <p className="text-xs text-slate-600 leading-relaxed">
+                1 primary ID (Passport, UMID, SSS, PhilID, or PRC).
               </p>
             </div>
 
-            {/* Requirement 3 */}
-            <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold">
+            {/* Card 3 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
                 <CreditCard className="w-4 h-4" />
                 <span>3. Security Deposit</span>
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Refundable security deposit collected upon release and returned after inspection.
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Refundable security deposit returned upon vehicle checkout.
               </p>
             </div>
 
-            {/* Requirement 4 */}
-            <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-amber-400 text-xs font-bold">
+            {/* Card 4 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
                 <Fuel className="w-4 h-4" />
                 <span>4. Fuel Policy</span>
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Same-to-Same fuel return policy. Vehicles are handed over clean and ready for travel.
-              </p>
-            </div>
-
-            {/* Requirement 5 */}
-            <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-2 sm:col-span-2 lg:col-span-2">
-              <div className="flex items-center gap-2 text-purple-400 text-xs font-bold">
-                <MapPin className="w-4 h-4" />
-                <span>5. Pickup & Delivery Options</span>
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Garage pickup available. Doorstep delivery or Airport/Terminal meetups can also be arranged upon request.
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Same-to-Same fuel return policy across all fleet units.
               </p>
             </div>
           </div>
@@ -616,15 +623,17 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950/90 py-6 px-4 text-center text-xs text-slate-400">
+      {/* Clean Footer (Individual rows on mobile as requested) */}
+      <footer className="border-t border-slate-200 bg-white py-6 px-4 text-center text-xs text-slate-600 mt-auto">
         <div className="max-w-4xl mx-auto space-y-2">
-          <p className="font-semibold text-slate-300">
-            Miranda Rentals & Services • Booking & Reservation Management
+          <p className="font-bold text-slate-900 text-sm">
+            Miranda Rentals and Services
           </p>
-          <p className="text-slate-400">
-            Operating Hours: 8:00 AM – 8:00 PM • Messenger: @mirandarentals
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-center gap-1.5 sm:gap-2 text-slate-600">
+            <span>Operating Hours: 8:00 AM – 8:00 PM</span>
+            <span className="hidden sm:inline text-slate-400">•</span>
+            <span>Facebook: Miranda Rentals and Services</span>
+          </div>
         </div>
       </footer>
     </div>
