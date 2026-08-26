@@ -11,6 +11,8 @@ export interface Booking {
   plateNumber?: string;
   selfDrive: boolean;
   driversLicenseDetails?: string;
+  licenseNumber?: string;
+  licenseExpiration?: string;
   passengers: number;
   startLocation: string;
   destination: string;

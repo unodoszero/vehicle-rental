@@ -172,12 +172,27 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
               </span>
             </div>
 
-            {booking.selfDrive && booking.driversLicenseDetails && (
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
-                <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">
-                  Driver License File
+            {booking.selfDrive && (booking.licenseNumber || booking.driversLicenseDetails) && (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1.5">
+                <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                  Driver's License Details
                 </span>
-                <span className="font-mono text-slate-800 font-semibold">{booking.driversLicenseDetails}</span>
+                {booking.licenseNumber ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">License No:</span>
+                      <span className="font-mono text-slate-900 font-semibold">{booking.licenseNumber}</span>
+                    </div>
+                    {booking.licenseExpiration && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Expiration Date:</span>
+                        <span className="font-mono text-slate-900 font-semibold">{booking.licenseExpiration}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span className="font-mono text-slate-800 font-semibold">{booking.driversLicenseDetails}</span>
+                )}
               </div>
             )}
 

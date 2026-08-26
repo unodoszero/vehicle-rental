@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Clock, AlertTriangle, ShieldCheck, MapPin, Phone, Car, 
-  Calendar, CheckCircle2, Navigation, ArrowLeft, RefreshCw, 
-  User, Info, AlertOctagon, HelpCircle, ArrowRight
+  Clock, ShieldCheck, MapPin, Phone, Car, 
+  Calendar, CheckCircle2, Navigation, RefreshCw, 
+  User, Info, AlertOctagon, ExternalLink, Sparkles,
+  MessageCircle, Copy, Check
 } from 'lucide-react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -12,19 +13,18 @@ import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly } 
 interface RenterTrackerViewProps {
   booking: Booking | null;
   bookingId?: string | null;
-  onBackToAdmin?: () => void;
 }
 
 export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   booking,
   bookingId,
-  onBackToAdmin,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [remoteBooking, setRemoteBooking] = useState<Booking | null>(booking);
   const [isLoading, setIsLoading] = useState(!booking && !!bookingId);
+  const [copiedLink, setCopiedLink] = useState(false);
 
-  // Precision 1-second interval ticker
+  // Precision 1-second live ticker
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -32,7 +32,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch or subscribe from Firestore if not in local memory
+  // Fetch or real-time subscribe from Firestore if not in local memory
   useEffect(() => {
     if (booking) {
       setRemoteBooking(booking);
@@ -66,11 +66,29 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
 
   const activeBooking = remoteBooking || booking;
 
+  const handleCopyLink = () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(window.location.href);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
+  };
+
+  // Mask license number for customer privacy (e.g. DL-8893021 -> DL-889****)
+  const maskLicenseNumber = (license?: string) => {
+    if (!license) return '';
+    const clean = license.trim();
+    if (clean.length <= 4) return '****';
+    const visiblePrefix = clean.slice(0, Math.max(3, clean.length - 4));
+    return `${visiblePrefix}****`;
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+        <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
         <p className="text-sm font-medium text-slate-300">Loading Live Rental Status...</p>
+        <span className="text-xs text-slate-500 mt-1">Miranda Rentals and Services</span>
       </div>
     );
   }
@@ -78,22 +96,35 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   if (!activeBooking) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-4">
-          <Car className="w-7 h-7" />
+        <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-4 shadow-xl">
+          <Car className="w-8 h-8 text-slate-400" />
         </div>
-        <h1 className="text-xl font-bold">Booking Not Found</h1>
-        <p className="text-xs text-slate-400 mt-2 max-w-sm">
-          The requested rental tracker identifier could not be located or has expired.
+        <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Booking Not Found</h1>
+        <p className="text-xs sm:text-sm text-slate-400 mt-2 max-w-sm">
+          This rental tracker identifier could not be located or has expired. Please contact Miranda Rentals and Services for assistance.
         </p>
-        {onBackToAdmin && (
-          <button
-            id="not-found-back-admin-btn"
-            onClick={onBackToAdmin}
-            className="mt-6 px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-lg hover:bg-blue-700 transition-colors shadow-md shadow-blue-600/20 active:scale-95"
+
+        {/* Contact Links */}
+        <div className="mt-8 flex flex-col sm:flex-row items-center gap-3 w-full max-w-xs">
+          <a
+            href="https://m.me/1193134077224088"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
           >
-            Return to Fleet Dashboard
-          </button>
-        )}
+            <MessageCircle className="w-4 h-4" />
+            Message on Messenger
+          </a>
+          <a
+            href="https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Official Facebook Page
+          </a>
+        </div>
       </div>
     );
   }
@@ -103,360 +134,446 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   const isUpcoming = timeCalc.isUpcoming;
   const isActive = timeCalc.isActive;
 
+  // Extract license number & expiration safely
+  const licenseNum = activeBooking.licenseNumber || (activeBooking.driversLicenseDetails ? activeBooking.driversLicenseDetails.split(/,\s*(?:Exp:?\s*|Expiration:?\s*)?/i)[0] : '');
+  const licenseExp = activeBooking.licenseExpiration || (activeBooking.driversLicenseDetails ? activeBooking.driversLicenseDetails.split(/,\s*(?:Exp:?\s*|Expiration:?\s*)?/i)[1] : '');
+
   return (
     <div
       id="renter-tracker-page"
-      className={`min-h-screen transition-colors duration-500 flex flex-col justify-between ${
+      className={`min-h-screen transition-colors duration-500 flex flex-col justify-between selection:bg-blue-600 selection:text-white ${
         isOvertime
-          ? 'bg-red-950 text-red-50'
+          ? 'bg-slate-950 text-red-50'
           : 'bg-slate-950 text-slate-100'
       }`}
     >
-      {/* Top Public Header */}
+      {/* Top Renter Branding Header */}
       <header
-        className={`px-4 sm:px-8 py-3.5 border-b flex items-center justify-between transition-colors duration-500 ${
+        className={`px-4 sm:px-8 py-3.5 border-b sticky top-0 z-30 transition-colors duration-500 backdrop-blur-md ${
           isOvertime
-            ? 'bg-red-900/60 border-red-800 backdrop-blur-xs'
-            : 'bg-slate-900/80 border-slate-800 backdrop-blur-xs'
+            ? 'bg-red-950/80 border-red-900/80'
+            : 'bg-slate-950/80 border-slate-800/80'
         }`}
       >
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-xs ${
-              isOvertime
-                ? 'bg-red-600 text-white animate-pulse'
-                : 'bg-blue-600 text-white'
-            }`}
-          >
-            <Car className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono tracking-wider uppercase text-slate-400">
-                Live Rental Time Tracker
-              </span>
-              <span className="text-slate-500 text-xs">•</span>
-              <span className="text-xs font-mono font-semibold text-slate-300">
-                {activeBooking.id}
-              </span>
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-lg transition-transform ${
+                isOvertime
+                  ? 'bg-red-600 text-white animate-pulse'
+                  : 'bg-gradient-to-tr from-blue-700 to-sky-500 text-white shadow-blue-600/30'
+              }`}
+            >
+              <Car className="w-5 h-5" />
             </div>
-            <h1 className="text-sm font-bold text-white tracking-tight">
-              {activeBooking.vehicleModel || `${activeBooking.vehicle} Rental`}
-            </h1>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400">
+                  Miranda Rentals & Services
+                </span>
+                <span className="text-slate-600 text-xs">•</span>
+                <span className="text-[11px] font-mono font-bold text-slate-300">
+                  {activeBooking.id}
+                </span>
+              </div>
+              <h1 className="text-xs sm:text-sm font-bold text-white tracking-tight">
+                Live Rental Time Tracker
+              </h1>
+            </div>
           </div>
-        </div>
 
-        {onBackToAdmin && (
+          {/* Quick Copy Link Action */}
           <button
-            id="renter-back-to-admin-btn"
-            onClick={onBackToAdmin}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg transition-colors border border-slate-700 text-slate-200"
+            onClick={handleCopyLink}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-800 transition-colors"
+            title="Copy tracker link"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Admin Portal</span>
+            {copiedLink ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline text-emerald-400">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden sm:inline">Share Link</span>
+              </>
+            )}
           </button>
-        )}
+        </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="max-w-4xl w-full mx-auto px-4 py-8 sm:py-10 flex-1 flex flex-col justify-center space-y-6">
+      <main className="max-w-4xl w-full mx-auto px-4 py-6 sm:py-8 flex-1 flex flex-col space-y-6">
         
         {/* Dynamic Status Alert Banner */}
         <div
           id="tracker-status-banner"
-          className={`p-4 sm:p-5 rounded-xl border transition-all duration-500 flex items-center justify-between gap-4 shadow-xl ${
+          className={`p-4 sm:p-5 rounded-2xl border transition-all duration-500 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl ${
             isOvertime
-              ? 'bg-red-600 text-white border-red-500 shadow-red-900/50'
+              ? 'bg-gradient-to-r from-red-950 via-red-900 to-red-950 text-white border-red-600 shadow-red-950/60 ring-1 ring-red-500/40'
               : isActive
-              ? 'bg-slate-900/90 text-slate-100 border-slate-800 shadow-black/40'
-              : 'bg-sky-950/80 text-sky-200 border-sky-800 shadow-sky-950/30'
+              ? 'bg-gradient-to-r from-slate-900 via-slate-900/90 to-blue-950/60 text-slate-100 border-slate-800 shadow-black/60'
+              : 'bg-gradient-to-r from-slate-900 via-slate-900/90 to-sky-950/60 text-sky-200 border-sky-900/60 shadow-sky-950/30'
           }`}
         >
           <div className="flex items-center gap-3.5">
             <div
-              className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-md ${
                 isOvertime
-                  ? 'bg-white text-red-700 font-bold'
+                  ? 'bg-red-500 text-white font-bold animate-bounce'
                   : isActive
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
               }`}
             >
               {isOvertime ? (
-                <AlertOctagon className="w-5 h-5 animate-pulse" />
+                <AlertOctagon className="w-5 h-5" />
               ) : isActive ? (
-                <Clock className="w-4 h-4" />
+                <Clock className="w-5 h-5" />
               ) : (
-                <Calendar className="w-4 h-4" />
+                <Calendar className="w-5 h-5" />
               )}
             </div>
 
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider block opacity-80">
-                {isOvertime ? 'Urgent Alert' : 'Rental Status'}
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider block opacity-75">
+                {isOvertime ? 'Urgent Alert' : 'Live Rental Status'}
               </span>
-              <h2 className="text-sm sm:text-base font-bold tracking-tight leading-tight">
+              <h2 className="text-sm sm:text-base font-bold tracking-tight leading-snug">
                 {isOvertime
-                  ? 'WARNING: RENTAL OVERTIME EXCEEDED'
+                  ? 'Rental Time Limit Exceeded'
                   : isActive
-                  ? 'Active Rental — Clock Running'
-                  : 'Scheduled Reservation — Ready for Pickup'}
+                  ? 'Active Rental — Timer Running'
+                  : 'Scheduled Trip — Ready for Dispatch'}
               </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isOvertime
+                  ? 'Your scheduled return time has passed. Please contact us via Messenger.'
+                  : isActive
+                  ? `Scheduled return on ${formatDateOnly(timeCalc.endDateTime)} at ${formatTimeOnly(timeCalc.endDateTime)}`
+                  : `Scheduled departure on ${activeBooking.startDate} at ${activeBooking.startTime}`}
+              </p>
             </div>
           </div>
 
-          {isOvertime && (
-            <a
-              href="tel:+18005550199"
-              className="shrink-0 px-3.5 py-1.5 bg-white text-red-700 hover:bg-slate-100 font-bold text-xs rounded-lg shadow-md transition-all flex items-center gap-1.5"
-            >
-              <Phone className="w-3.5 h-3.5" />
-              Contact Dispatch
-            </a>
-          )}
+          {/* Quick Messenger CTA in Banner */}
+          <a
+            href="https://m.me/1193134077224088"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`w-full sm:w-auto shrink-0 px-4 py-2 font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${
+              isOvertime
+                ? 'bg-white text-red-700 hover:bg-slate-100'
+                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/30'
+            }`}
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>Chat on Messenger</span>
+          </a>
         </div>
 
         {/* Hero Countdown Timer Display */}
         <div
           id="tracker-timer-container"
-          className={`p-6 sm:p-8 rounded-xl border transition-all duration-500 flex flex-col items-center text-center shadow-2xl relative overflow-hidden ${
+          className={`p-6 sm:p-8 rounded-2xl border transition-all duration-500 flex flex-col items-center text-center shadow-2xl relative overflow-hidden ${
             isOvertime
-              ? 'bg-gradient-to-b from-red-900/90 to-red-950/95 border-red-600 shadow-red-950/60 ring-1 ring-red-500/50'
-              : 'bg-gradient-to-b from-slate-900/90 to-slate-950/95 border-slate-800 shadow-black/80'
+              ? 'bg-gradient-to-b from-red-950/90 to-slate-950 border-red-700/80 shadow-red-950/60 ring-1 ring-red-500/30'
+              : 'bg-gradient-to-b from-slate-900/90 to-slate-950 border-slate-800/90 shadow-black/80'
           }`}
         >
           {/* Subtle Ambient Glow */}
           <div
-            className={`absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-15 ${
-              isOvertime ? 'bg-red-500' : 'bg-blue-500'
+            className={`absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-20 ${
+              isOvertime ? 'bg-red-500' : 'bg-blue-600'
             }`}
           />
 
-          <span className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-2 relative z-10">
+          <span className="text-[10px] sm:text-[11px] font-mono uppercase tracking-widest text-slate-400 mb-2 relative z-10 font-bold">
             {isOvertime
-              ? 'Overtime Elapsed Beyond Schedule'
+              ? 'Overtime Elapsed'
               : isUpcoming
-              ? 'Time Until Scheduled Departure'
-              : 'Time Remaining on Current Rental'}
+              ? 'Time Until Trip Starts'
+              : 'Time Remaining on Rental'}
           </span>
 
-          {/* Time digits grid */}
-          <div className="grid grid-cols-4 gap-2 sm:gap-3 my-3 max-w-xl w-full relative z-10 font-mono">
+          {/* Time digits grid (Mobile-Optimized Single-Tap Clarity) */}
+          <div className="grid grid-cols-4 gap-2 sm:gap-4 my-3 max-w-xl w-full relative z-10 font-mono">
             {/* Days */}
             <div
-              className={`p-3 sm:p-4 rounded-xl border flex flex-col items-center ${
+              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
                 isOvertime
-                  ? 'bg-red-950/80 border-red-700/80 text-red-100'
-                  : 'bg-slate-900/90 border-slate-800 text-white'
+                  ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
+                  : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
               }`}
             >
               <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
                 {String(timeCalc.daysRemaining).padStart(2, '0')}
               </span>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
                 Days
               </span>
             </div>
 
             {/* Hours */}
             <div
-              className={`p-3 sm:p-4 rounded-xl border flex flex-col items-center ${
+              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
                 isOvertime
-                  ? 'bg-red-950/80 border-red-700/80 text-red-100'
-                  : 'bg-slate-900/90 border-slate-800 text-white'
+                  ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
+                  : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
               }`}
             >
               <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
                 {String(timeCalc.hoursRemaining).padStart(2, '0')}
               </span>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
                 Hours
               </span>
             </div>
 
             {/* Minutes */}
             <div
-              className={`p-3 sm:p-4 rounded-xl border flex flex-col items-center ${
+              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
                 isOvertime
-                  ? 'bg-red-950/80 border-red-700/80 text-red-100'
-                  : 'bg-slate-900/90 border-slate-800 text-white'
+                  ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
+                  : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
               }`}
             >
               <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
                 {String(timeCalc.minutesRemaining).padStart(2, '0')}
               </span>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
                 Mins
               </span>
             </div>
 
             {/* Seconds */}
             <div
-              className={`p-3 sm:p-4 rounded-xl border flex flex-col items-center ${
+              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
                 isOvertime
-                  ? 'bg-red-950/80 border-red-700/80 text-red-100'
-                  : 'bg-slate-900/90 border-slate-800 text-white'
+                  ? 'bg-red-950/90 border-red-700 text-red-200 shadow-md'
+                  : 'bg-slate-900/90 border-slate-800 text-blue-400 shadow-md'
               }`}
             >
-              <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter text-blue-400">
+              <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter animate-pulse">
                 {String(timeCalc.secondsRemaining).padStart(2, '0')}
               </span>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
                 Secs
               </span>
             </div>
           </div>
 
-          {/* Progress Bar */}
-          <div className="w-full max-w-xl mt-3 relative z-10">
-            <div className="flex justify-between text-[11px] text-slate-400 mb-1 font-mono">
-              <span>Start: {activeBooking.startDate} {activeBooking.startTime}</span>
-              <span>
+          {/* Progress Bar & Scheduled Window */}
+          <div className="w-full max-w-xl mt-3 relative z-10 space-y-2">
+            <div className="flex justify-between items-center text-[11px] sm:text-xs text-slate-400 font-mono">
+              <span className="truncate">Start: {activeBooking.startDate} {activeBooking.startTime}</span>
+              <span className="truncate text-right">
                 Return: {formatDateOnly(timeCalc.endDateTime)} {formatTimeOnly(timeCalc.endDateTime)}
               </span>
             </div>
-            <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
+            <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden p-0.5 border border-slate-700">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
-                  isOvertime ? 'bg-red-500 animate-pulse' : 'bg-blue-500'
+                  isOvertime ? 'bg-red-500 animate-pulse' : 'bg-gradient-to-r from-blue-500 to-sky-400'
                 }`}
                 style={{ width: `${Math.min(100, timeCalc.progressPercentage)}%` }}
               />
             </div>
             {isOvertime && (
-              <p className="text-[11px] text-red-300 font-bold mt-2 text-center animate-pulse">
-                Vehicle return was scheduled for {formatDateTime(timeCalc.endDateTime)}. Please return immediately or contact dispatch.
+              <p className="text-xs text-red-300 font-semibold text-center pt-1">
+                Vehicle return was scheduled for {formatDateTime(timeCalc.endDateTime)}.
               </p>
             )}
           </div>
         </div>
 
-        {/* Detailed Rental Trip Card */}
+        {/* Organized Booking Details Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Route & Passenger Card */}
-          <div
-            className={`p-4 sm:p-5 rounded-xl border backdrop-blur-xs space-y-3 ${
-              isOvertime ? 'bg-red-900/30 border-red-800/80' : 'bg-slate-900/70 border-slate-800'
-            }`}
-          >
-            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-blue-400" />
-              Route & Logistics
-            </h3>
+          {/* Trip Logistics Card */}
+          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-blue-400" />
+                Trip Itinerary & Hubs
+              </h3>
+              <span className="text-[11px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md">
+                {activeBooking.noOfDays} Day{activeBooking.noOfDays > 1 ? 's' : ''} ({activeBooking.noOfDays * 24}h)
+              </span>
+            </div>
 
-            <div className="space-y-2 text-xs">
-              <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[10px] block uppercase font-mono">Pickup Hub</span>
-                <span className="font-semibold text-white text-xs block mt-0.5">{activeBooking.startLocation}</span>
+            <div className="space-y-3 text-xs">
+              <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                <span className="text-slate-400 text-[10px] block uppercase font-mono tracking-wider">
+                  Pickup / Start Location
+                </span>
+                <span className="font-bold text-white text-sm block mt-0.5">
+                  {activeBooking.startLocation}
+                </span>
               </div>
 
-              <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[10px] block uppercase font-mono">Return Destination</span>
-                <span className="font-semibold text-white text-xs block mt-0.5">{activeBooking.destination}</span>
+              <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                <span className="text-slate-400 text-[10px] block uppercase font-mono tracking-wider">
+                  Destination / Return Point
+                </span>
+                <span className="font-bold text-white text-sm block mt-0.5">
+                  {activeBooking.destination}
+                </span>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
-              <span className="text-slate-400">Total Duration:</span>
-              <strong className="text-white font-mono">{activeBooking.noOfDays} Day{activeBooking.noOfDays > 1 ? 's' : ''} ({activeBooking.noOfDays * 24} hrs)</strong>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400">Passenger Capacity:</span>
-              <strong className="text-white">{activeBooking.passengers} Passengers</strong>
+            <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
+              <div className="p-2.5 bg-slate-950/50 rounded-lg border border-slate-800/60">
+                <span className="text-slate-500 text-[10px] block uppercase">Scheduled Start</span>
+                <strong className="text-slate-200 font-mono block mt-0.5 text-xs">
+                  {activeBooking.startDate} • {activeBooking.startTime}
+                </strong>
+              </div>
+              <div className="p-2.5 bg-slate-950/50 rounded-lg border border-slate-800/60">
+                <span className="text-slate-500 text-[10px] block uppercase">Expected Return</span>
+                <strong className="text-slate-200 font-mono block mt-0.5 text-xs">
+                  {formatDateOnly(timeCalc.endDateTime)} • {formatTimeOnly(timeCalc.endDateTime)}
+                </strong>
+              </div>
             </div>
           </div>
 
           {/* Vehicle & Renter Verification Card */}
-          <div
-            className={`p-4 sm:p-5 rounded-xl border backdrop-blur-xs space-y-3 ${
-              isOvertime ? 'bg-red-900/30 border-red-800/80' : 'bg-slate-900/70 border-slate-800'
-            }`}
-          >
-            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Car className="w-3.5 h-3.5 text-sky-400" />
-              Vehicle & Driver Classification
-            </h3>
+          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <Car className="w-4 h-4 text-sky-400" />
+                Vehicle & Driver Profile
+              </h3>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                activeBooking.selfDrive
+                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                  : 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+              }`}>
+                {activeBooking.selfDrive ? 'Self-Drive Rental' : 'With Chauffeur'}
+              </span>
+            </div>
 
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Assigned Vehicle:</span>
-                <strong className="text-white">{activeBooking.vehicle} ({activeBooking.vehicleModel || 'Standard'})</strong>
-              </div>
-
-              {activeBooking.plateNumber && (
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">License Plate:</span>
-                  <span className="font-mono bg-slate-800 px-2 py-0.5 rounded text-white font-bold text-[11px] border border-slate-700">
-                    {activeBooking.plateNumber}
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                <div>
+                  <span className="text-slate-400 text-[10px] block uppercase font-mono">Assigned Vehicle</span>
+                  <span className="font-bold text-white text-sm block mt-0.5">
+                    {activeBooking.vehicleModel || (activeBooking.vehicle === 'Van' ? 'Toyota Hiace Commuter Van' : 'Toyota Vios')}
                   </span>
                 </div>
-              )}
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Driver Mode:</span>
-                <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
-                  activeBooking.selfDrive
-                    ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
-                    : 'bg-blue-400/20 text-blue-300 border border-blue-400/30'
-                }`}>
-                  {activeBooking.selfDrive ? 'Self-Drive (Authorized Driver)' : 'Company Chauffeur Included'}
-                </span>
+                <div className="text-right">
+                  <span className="text-slate-400 text-[10px] block uppercase font-mono">Type & Seats</span>
+                  <span className="text-slate-200 font-semibold block mt-0.5">
+                    {activeBooking.vehicle} • {activeBooking.passengers} Pax
+                  </span>
+                </div>
               </div>
 
-              {activeBooking.selfDrive && activeBooking.driversLicenseDetails && (
-                <div className="p-2 bg-slate-950/60 rounded-lg border border-slate-800 mt-2">
-                  <span className="text-[10px] text-slate-400 block uppercase font-mono">Driver License File</span>
-                  <span className="text-[11px] text-slate-200 font-mono">{activeBooking.driversLicenseDetails}</span>
+              {/* Renter Contact Info */}
+              <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 text-[10px] uppercase font-mono">Renter Name</span>
+                  <strong className="text-white text-xs">{activeBooking.name}</strong>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 text-[10px] uppercase font-mono">Mobile Number</span>
+                  <span className="font-mono text-slate-200 text-xs">{activeBooking.mobileNo}</span>
+                </div>
+              </div>
+
+              {/* Driver's License Details (Masked for Privacy) */}
+              {activeBooking.selfDrive && (licenseNum || licenseExp) && (
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 text-[10px] uppercase font-mono flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      Authorized Driver License
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-mono">
+                      Verified
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-slate-400 text-xs">License No:</span>
+                    <span className="font-mono font-bold text-slate-200 text-xs">
+                      {maskLicenseNumber(licenseNum)}
+                    </span>
+                  </div>
+                  {licenseExp && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-xs">Expiration Date:</span>
+                      <span className="font-mono text-slate-300 text-xs">
+                        {licenseExp}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-
-            <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
-              <span className="text-slate-400">Reserved For:</span>
-              <strong className="text-white">{activeBooking.name}</strong>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400">Customer Mobile:</span>
-              <span className="font-mono text-slate-300">{activeBooking.mobileNo}</span>
             </div>
           </div>
         </div>
 
-        {/* Emergency Dispatch & Return Guidelines */}
-        <div
-          className={`p-4 sm:p-5 rounded-xl border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
-            isOvertime
-              ? 'bg-red-950/90 border-red-700 text-red-200'
-              : 'bg-slate-900/60 border-slate-800 text-slate-400'
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+        {/* Dedicated Miranda Rentals Reach & Assistance Hub */}
+        <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
             <div>
-              <strong className="text-white block text-xs sm:text-sm">24/7 Operations Dispatch & Roadside Assistance</strong>
-              <p className="mt-0.5 text-slate-400 text-[11px]">
-                Need to extend your rental duration or require support? Contact fleet operations immediately.
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-blue-400" />
+                Need Assistance or Extending Your Trip?
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Connect directly with Miranda Rentals and Services team anytime.
               </p>
             </div>
+            <span className="text-[11px] font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full flex items-center gap-1.5 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+              Online & Ready
+            </span>
           </div>
 
-          <a
-            href="tel:+18005550199"
-            className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-blue-600/20 text-xs active:scale-95"
-          >
-            <Phone className="w-3.5 h-3.5" />
-            <span>Call +1 (800) 555-0199</span>
-          </a>
+          {/* Social Reach Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {/* Messenger Button */}
+            <a
+              id="reach-messenger-btn"
+              href="https://m.me/1193134077224088"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="py-3.5 px-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2.5 active:scale-98"
+            >
+              <MessageCircle className="w-5 h-5 fill-current" />
+              <span>Chat via Facebook Messenger</span>
+            </a>
+
+            {/* Official Facebook Page Button */}
+            <a
+              id="reach-facebook-btn"
+              href="https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 hover:text-white font-bold text-xs sm:text-sm rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2.5 shadow-md active:scale-98"
+            >
+              <ExternalLink className="w-5 h-5" />
+              <span>Visit Official Facebook Page</span>
+            </a>
+          </div>
+
+          <p className="text-[11px] text-slate-500 text-center pt-2">
+            For fastest response regarding route adjustments or questions, message us directly via Messenger.
+          </p>
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="py-3 text-center text-[11px] text-slate-500 border-t border-slate-900">
-        Miranda Rentals and Services • Live Rental Time Tracker
+      {/* Renter Dedicated Footer */}
+      <footer className="py-5 text-center text-xs text-slate-500 border-t border-slate-900 bg-slate-950/80">
+        <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>Miranda Rentals and Services</span>
+          <span className="text-[11px] text-slate-600">
+            Booking ID: {activeBooking.id} • Live Customer Renter Portal
+          </span>
+        </div>
       </footer>
     </div>
   );
 };
-

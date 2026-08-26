@@ -25,10 +25,11 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
   const [name, setName] = useState('');
   const [mobileNo, setMobileNo] = useState('');
   const [vehicle, setVehicle] = useState<VehicleType>('Car');
-  const [vehicleModel, setVehicleModel] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('Toyota Vios');
   const [plateNumber, setPlateNumber] = useState('');
   const [selfDrive, setSelfDrive] = useState(true);
-  const [driversLicenseDetails, setDriversLicenseDetails] = useState('');
+  const [licenseNumber, setLicenseNumber] = useState('');
+  const [licenseExpiration, setLicenseExpiration] = useState('');
   const [passengers, setPassengers] = useState<number>(2);
   const [startLocation, setStartLocation] = useState('');
   const [destination, setDestination] = useState('');
@@ -45,10 +46,24 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setName(editingBooking.name);
       setMobileNo(editingBooking.mobileNo);
       setVehicle(editingBooking.vehicle);
-      setVehicleModel(editingBooking.vehicleModel || '');
+      setVehicleModel(editingBooking.vehicleModel || (editingBooking.vehicle === 'Van' ? 'Toyota Hiace Commuter Van' : 'Toyota Vios'));
       setPlateNumber(editingBooking.plateNumber || '');
       setSelfDrive(editingBooking.selfDrive);
-      setDriversLicenseDetails(editingBooking.driversLicenseDetails || '');
+
+      // Handle split license fields or backward compatibility from driversLicenseDetails
+      if (editingBooking.licenseNumber || editingBooking.licenseExpiration) {
+        setLicenseNumber(editingBooking.licenseNumber || '');
+        setLicenseExpiration(editingBooking.licenseExpiration || '');
+      } else if (editingBooking.driversLicenseDetails) {
+        // Attempt to parse existing combined strings like "DL-8893021, Exp: 01/01/2030"
+        const parts = editingBooking.driversLicenseDetails.split(/,\s*(?:Exp:?\s*|Expiration:?\s*)?/i);
+        setLicenseNumber(parts[0] || editingBooking.driversLicenseDetails);
+        setLicenseExpiration(parts[1] || '');
+      } else {
+        setLicenseNumber('');
+        setLicenseExpiration('');
+      }
+
       setPassengers(editingBooking.passengers);
       setStartLocation(editingBooking.startLocation);
       setDestination(editingBooking.destination);
@@ -67,7 +82,8 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setVehicleModel('Toyota Vios');
       setPlateNumber('');
       setSelfDrive(true);
-      setDriversLicenseDetails('');
+      setLicenseNumber('');
+      setLicenseExpiration('');
       setPassengers(2);
       setStartLocation('');
       setDestination('');
@@ -85,17 +101,14 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     setVehicle(newVehicle);
     if (newVehicle === 'Van') {
       setSelfDrive(false);
-      setDriversLicenseDetails('');
+      setLicenseNumber('');
+      setLicenseExpiration('');
+      setVehicleModel('Toyota Hiace Commuter Van');
       if (passengers < 6) setPassengers(8);
-      if (!vehicleModel || vehicleModel === 'Toyota Vios') {
-        setVehicleModel('Toyota Hiace Commuter Van');
-      }
     } else {
       setSelfDrive(true);
+      setVehicleModel('Toyota Vios');
       if (passengers > 7) setPassengers(4);
-      if (!vehicleModel || vehicleModel === 'Toyota Hiace Commuter Van') {
-        setVehicleModel('Toyota Vios');
-      }
     }
   };
 
@@ -120,8 +133,13 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     }
 
     // Driver's license validation when selfDrive is true (only on Car)
-    if (vehicle === 'Car' && selfDrive && !driversLicenseDetails.trim()) {
-      errs.driversLicenseDetails = "Driver's license details are required for self-drive rentals";
+    if (vehicle === 'Car' && selfDrive) {
+      if (!licenseNumber.trim()) {
+        errs.licenseNumber = 'License number is required for self-drive';
+      }
+      if (!licenseExpiration.trim()) {
+        errs.licenseExpiration = 'Expiration date is required for self-drive';
+      }
     }
 
     setErrors(errs);
@@ -132,15 +150,21 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     e.preventDefault();
     if (!validate()) return;
 
+    const formattedLicenseDetails = vehicle === 'Car' && selfDrive && licenseNumber.trim()
+      ? `${licenseNumber.trim()}${licenseExpiration.trim() ? `, Exp: ${licenseExpiration.trim()}` : ''}`
+      : undefined;
+
     const bookingData: Booking = {
       id: editingBooking ? editingBooking.id : generateBookingId(),
       name: name.trim(),
       mobileNo: mobileNo.trim(),
       vehicle,
-      vehicleModel: vehicleModel.trim() || (vehicle === 'Car' ? 'Toyota Vios' : 'Toyota Hiace Commuter Van'),
+      vehicleModel: vehicle === 'Car' ? 'Toyota Vios' : 'Toyota Hiace Commuter Van',
       plateNumber: plateNumber.trim(),
       selfDrive: vehicle === 'Van' ? false : selfDrive,
-      driversLicenseDetails: vehicle === 'Car' && selfDrive ? driversLicenseDetails.trim() : undefined,
+      licenseNumber: vehicle === 'Car' && selfDrive ? licenseNumber.trim() : undefined,
+      licenseExpiration: vehicle === 'Car' && selfDrive ? licenseExpiration.trim() : undefined,
+      driversLicenseDetails: formattedLicenseDetails,
       passengers: Number(passengers),
       startLocation: startLocation.trim(),
       destination: destination.trim(),
@@ -216,15 +240,15 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   Customer Full Name <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                   <input
                     id="booking-name-input"
                     type="text"
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Jordan Mitchell"
-                    className={`w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                    placeholder="Juan Dela Cruz"
+                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
                       errors.name ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -237,15 +261,15 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   Mobile Number <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                   <input
                     id="booking-mobile-input"
                     type="tel"
                     required
                     value={mobileNo}
                     onChange={(e) => setMobileNo(e.target.value)}
-                    placeholder="e.g. +1 (555) 019-2834"
-                    className={`w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                    placeholder="09123456789"
+                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
                       errors.mobileNo ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -272,25 +296,25 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   id="booking-vehicle-select"
                   value={vehicle}
                   onChange={(e) => handleVehicleChange(e.target.value as VehicleType)}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
+                  className="w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
                 >
                   <option value="Car">Car (Self-Drive Allowed)</option>
                   <option value="Van">Van (Chauffeur Only)</option>
                 </select>
               </div>
 
-              {/* Optional Vehicle Model */}
+              {/* Uneditable Model field with label 'Model' */}
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Model / Description
+                  Model
                 </label>
                 <input
                   id="booking-model-input"
                   type="text"
-                  value={vehicleModel}
-                  onChange={(e) => setVehicleModel(e.target.value)}
-                  placeholder={vehicle === 'Car' ? 'e.g. Toyota Vios' : 'e.g. Toyota Hiace Commuter Van'}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  readOnly
+                  disabled
+                  value={vehicle === 'Car' ? 'Toyota Vios' : 'Toyota Hiace Commuter Van'}
+                  className="w-full px-3 py-2.5 text-base sm:text-xs bg-slate-100/90 border border-slate-200 rounded-lg text-slate-700 font-semibold cursor-not-allowed select-none"
                 />
               </div>
 
@@ -300,7 +324,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   Passengers <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
-                  <Users className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <Users className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                   <input
                     id="booking-passengers-input"
                     type="number"
@@ -309,7 +333,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     required
                     value={passengers}
                     onChange={(e) => setPassengers(Number(e.target.value))}
-                    className={`w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                       errors.passengers ? 'border-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -341,27 +365,54 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     </label>
                   </div>
 
-                  {/* Dynamic License Details Input (Shown when Car + Self-Drive) */}
+                  {/* Divided License Section: License Number & Expiration Date */}
                   {selfDrive && (
                     <div className="mt-3 pt-3 border-t border-blue-100 animate-fade-in">
-                      <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                        <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                        Driver's License Details <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        id="booking-license-input"
-                        type="text"
-                        required={selfDrive}
-                        value={driversLicenseDetails}
-                        onChange={(e) => setDriversLicenseDetails(e.target.value)}
-                        placeholder="License Number, State/Country, Expiry Date (e.g. DL-8893021, Exp 2028-10)"
-                        className={`w-full px-3 py-2 text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                          errors.driversLicenseDetails ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
-                        }`}
-                      />
-                      {errors.driversLicenseDetails && (
-                        <p className="text-[11px] text-red-600 mt-1">{errors.driversLicenseDetails}</p>
-                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* License Number Field */}
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+                            License Number <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            id="booking-license-no-input"
+                            type="text"
+                            required={selfDrive}
+                            value={licenseNumber}
+                            onChange={(e) => setLicenseNumber(e.target.value)}
+                            placeholder="DL-8893021"
+                            className={`w-full px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                              errors.licenseNumber ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
+                            }`}
+                          />
+                          {errors.licenseNumber && (
+                            <p className="text-[11px] text-red-600 mt-1">{errors.licenseNumber}</p>
+                          )}
+                        </div>
+
+                        {/* Expiration Date Field */}
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                            Expiration Date <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            id="booking-license-exp-input"
+                            type="text"
+                            required={selfDrive}
+                            value={licenseExpiration}
+                            onChange={(e) => setLicenseExpiration(e.target.value)}
+                            placeholder="01/01/2030"
+                            className={`w-full px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                              errors.licenseExpiration ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
+                            }`}
+                          />
+                          {errors.licenseExpiration && (
+                            <p className="text-[11px] text-red-600 mt-1">{errors.licenseExpiration}</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -392,15 +443,15 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   Start Location <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
-                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                   <input
                     id="booking-startlocation-input"
                     type="text"
                     required
                     value={startLocation}
                     onChange={(e) => setStartLocation(e.target.value)}
-                    placeholder="e.g. Terminal 1 Dispatch Hub"
-                    className={`w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    placeholder="Tarlac City, Tarlac"
+                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       errors.startLocation ? 'border-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -413,15 +464,15 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   Destination <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
-                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                   <input
                     id="booking-destination-input"
                     type="text"
                     required
                     value={destination}
                     onChange={(e) => setDestination(e.target.value)}
-                    placeholder="e.g. Pine Ridge Resort & Return"
-                    className={`w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    placeholder="San Fernando, Pampanga"
+                    className={`w-full pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       errors.destination ? 'border-red-400' : 'border-slate-200'
                     }`}
                   />
@@ -450,7 +501,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   required
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                  className={`w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                     errors.startDate ? 'border-red-400' : 'border-slate-200'
                   }`}
                 />
@@ -468,7 +519,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   required
                   value={startTime}
                   onChange={(e) => setStartTime(e.target.value)}
-                  className={`w-full px-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                  className={`w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                     errors.startTime ? 'border-red-400' : 'border-slate-200'
                   }`}
                 />
@@ -489,7 +540,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                   required
                   value={noOfDays}
                   onChange={(e) => setNoOfDays(Math.max(1, Number(e.target.value)))}
-                  className={`w-full px-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                  className={`w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
                     errors.noOfDays ? 'border-red-400' : 'border-slate-200'
                   }`}
                 />
@@ -524,8 +575,8 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                 rows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. VIP client, child seat requested, luggage assistance..."
-                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                placeholder="VIP client, child seat requested, luggage assistance..."
+                className="w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               />
             </div>
 

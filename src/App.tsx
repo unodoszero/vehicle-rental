@@ -202,7 +202,7 @@ function MainApp() {
     return (
       <RenterTrackerView
         booking={activeBooking}
-        onBackToAdmin={handleBackToAdmin}
+        bookingId={activeTrackerId}
       />
     );
   }
