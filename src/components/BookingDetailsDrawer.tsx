@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Copy, Check, ExternalLink, Calendar, Clock, MapPin, 
   Phone, User, Users, Car, ShieldCheck, AlertTriangle, 
-  Edit, Trash2, ArrowRight, Sparkles, Navigation
+  Edit, Trash2, ArrowRight, Sparkles, Navigation, MessageSquare
 } from 'lucide-react';
 import { Booking } from '../types';
 import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly } from '../utils/dateUtils';
@@ -27,6 +27,8 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
 }) => {
   const { showToast } = useToast();
   const [copied, setCopied] = useState(false);
+  const [copiedMessage, setCopiedMessage] = useState(false);
+  const [customMessage, setCustomMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Second-by-second live calculation
@@ -38,6 +40,35 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
     return () => clearInterval(interval);
   }, [isOpen, booking]);
 
+  // Generate and set friendly professional customer message when booking opens/changes
+  useEffect(() => {
+    if (booking) {
+      const trackerKey = booking.trackingToken || booking.id;
+      const trackerUrl = `${window.location.origin}/tracker?id=${encodeURIComponent(trackerKey)}`;
+      const calc = calculateBookingTime(booking, new Date());
+      const vehicleDesc = `${booking.vehicle}${booking.vehicleModel ? ` (${booking.vehicleModel})` : ''}${booking.plateNumber ? ` [Plate: ${booking.plateNumber}]` : ''}`;
+      
+      const message = `Hi ${booking.name}!
+
+Thank you for choosing Miranda Rentals and Services. Your reservation for the ${vehicleDesc} has been confirmed.
+
+Rental Schedule:
+• Pickup / Start: ${formatDateOnly(booking.startDate)} at ${formatTimeOnly(booking.startTime)}
+• Expected Return: ${formatDateOnly(calc.endDateTime)} at ${formatTimeOnly(calc.endDateTime)} (${booking.noOfDays} Day${booking.noOfDays > 1 ? 's' : ''})
+• Service Type: ${booking.selfDrive ? 'Self-Drive' : 'With Driver'}
+• Reference No.: ${booking.id}
+
+The ${booking.vehicle.toLowerCase()} has been thoroughly cleaned, sanitized, and inspected for your journey.
+
+For full booking details, return instructions, and live status tracking, please open your secure link:
+${trackerUrl}
+
+Have a safe and pleasant trip! Please feel free to message us if you need any assistance.`;
+
+      setCustomMessage(message);
+    }
+  }, [booking, isOpen]);
+
   if (!isOpen || !booking) return null;
 
   const timeCalc = calculateBookingTime(booking, currentTime);
@@ -46,7 +77,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
 
   const handleCopyLink = () => {
     // Generate secure tracker link with unguessable cryptographic token
-    const trackerUrl = `${window.location.origin}${window.location.pathname}?tracker=${trackerKey}`;
+    const trackerUrl = `${window.location.origin}/tracker?id=${encodeURIComponent(trackerKey)}`;
     navigator.clipboard.writeText(trackerUrl).then(() => {
       setCopied(true);
       showToast('Secure Tracker Link Copied!', `Token-secured link for ${booking.name} copied to clipboard.`, 'success');
@@ -54,6 +85,16 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
     }).catch(() => {
       // Fallback
       prompt('Copy this tracker link for the renter:', trackerUrl);
+    });
+  };
+
+  const handleCopyMessage = () => {
+    navigator.clipboard.writeText(customMessage).then(() => {
+      setCopiedMessage(true);
+      showToast('Message Copied!', `Customer confirmation message for ${booking.name} copied to clipboard.`, 'success');
+      setTimeout(() => setCopiedMessage(false), 2500);
+    }).catch(() => {
+      prompt('Copy customer message:', customMessage);
     });
   };
 
@@ -126,7 +167,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
                   {timeCalc.formattedRemaining}
                 </div>
                 <p className="text-[11px] text-slate-300">
-                  Starts {booking.startDate} at {booking.startTime}
+                  Starts {formatDateOnly(booking.startDate)} at {formatTimeOnly(booking.startTime)}
                 </p>
               </div>
             )}
@@ -135,8 +176,8 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
           {/* Structured Booking Info List */}
           <div className="space-y-3 pt-2">
             <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
-              <span className="text-slate-500">Booking ID:</span>
-              <span className="font-bold font-mono text-slate-900">#{booking.id}</span>
+              <span className="text-slate-500">Secure Tracking Ref:</span>
+              <span className="font-bold font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">{booking.trackingToken || booking.id}</span>
             </div>
 
             <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
@@ -174,27 +215,48 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
               </span>
             </div>
 
-            {booking.selfDrive && (booking.licenseNumber || booking.driversLicenseDetails) && (
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1.5">
+            {booking.selfDrive && (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-2">
                 <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                  Driver's License Details
+                  Designated Driver Profile
                 </span>
-                {booking.licenseNumber ? (
-                  <div className="space-y-1">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Driver Name:</span>
+                    <span className="text-slate-900 font-bold">
+                      {booking.driverName || booking.name}
+                      {booking.renterIsDriver !== false && (
+                        <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-semibold">
+                          Renter
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {booking.driverBirthdate && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Birthdate:</span>
+                      <span className="font-mono text-slate-900 font-semibold">{formatDateOnly(booking.driverBirthdate)}</span>
+                    </div>
+                  )}
+                  {booking.licenseNumber && (
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">License No:</span>
                       <span className="font-mono text-slate-900 font-semibold">{booking.licenseNumber}</span>
                     </div>
-                    {booking.licenseExpiration && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500">Expiration Date:</span>
-                        <span className="font-mono text-slate-900 font-semibold">{booking.licenseExpiration}</span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <span className="font-mono text-slate-800 font-semibold">{booking.driversLicenseDetails}</span>
-                )}
+                  )}
+                  {booking.licenseExpiration && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Expiration Date:</span>
+                      <span className="font-mono text-slate-900 font-semibold">{formatDateOnly(booking.licenseExpiration)}</span>
+                    </div>
+                  )}
+                  {!booking.licenseNumber && booking.driversLicenseDetails && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">License Details:</span>
+                      <span className="font-mono text-slate-900 font-semibold">{booking.driversLicenseDetails}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -208,7 +270,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
             <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
               <span className="text-slate-500">Schedule:</span>
               <span className="font-semibold text-slate-900">
-                {booking.startDate} ({booking.startTime}) • {booking.noOfDays} Day{booking.noOfDays > 1 ? 's' : ''}
+                {formatDateOnly(booking.startDate)} ({formatTimeOnly(booking.startTime)}) • {booking.noOfDays} Day{booking.noOfDays > 1 ? 's' : ''}
               </span>
             </div>
 
@@ -237,7 +299,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
             </div>
             <div className="flex items-center space-x-2">
               <div className="flex-1 truncate bg-slate-100 p-2 rounded text-[11px] font-mono text-slate-600 border border-slate-200">
-                {`${window.location.origin}${window.location.pathname}?tracker=${trackerKey}`}
+                {`${window.location.origin}/tracker?id=${trackerKey}`}
               </div>
               <button
                 id="copy-tracker-link-btn"
@@ -248,22 +310,66 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
                 {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
-            <div className="flex items-center justify-between mt-2">
-              <button
-                onClick={handleCopyLink}
-                className="text-[11px] text-blue-600 font-semibold hover:underline"
-              >
-                {copied ? 'Copied Secure Link' : 'Copy Secure Link'}
-              </button>
-
+            <div className="flex items-center justify-end mt-2">
               <button
                 id="open-live-tracker-btn"
                 onClick={() => onOpenTracker(trackerKey)}
-                className="text-[11px] text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1"
+                className="text-[11px] text-slate-600 hover:text-blue-600 font-medium flex items-center gap-1 transition-colors cursor-pointer"
               >
-                <ExternalLink className="w-3 h-3 text-slate-400" />
+                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
                 Preview Live Tracker
               </button>
+            </div>
+          </div>
+
+          {/* Customer Confirmation Message Section */}
+          <div className="pt-2">
+            <div className="flex items-center justify-between mb-2">
+              <label htmlFor="customer-message-textarea" className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
+                Customer Confirmation Message
+              </label>
+              <span className="text-[10px] font-medium text-slate-500">
+                Ready to send
+              </span>
+            </div>
+
+            <div className="relative rounded-xl border border-slate-200 bg-slate-50 overflow-hidden focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+              <textarea
+                id="customer-message-textarea"
+                rows={7}
+                value={customMessage}
+                onChange={(e) => setCustomMessage(e.target.value)}
+                className="w-full p-3 text-xs text-slate-800 bg-transparent border-0 resize-y font-sans leading-relaxed focus:outline-none"
+                placeholder="Customer confirmation message..."
+              />
+              <div className="flex items-center justify-between px-3 py-2 bg-slate-100/90 border-t border-slate-200">
+                <span className="text-[10px] text-slate-500 italic">
+                  Editable before copying
+                </span>
+                <button
+                  id="copy-customer-message-btn"
+                  type="button"
+                  onClick={handleCopyMessage}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer ${
+                    copiedMessage 
+                      ? 'bg-emerald-600 text-white' 
+                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                >
+                  {copiedMessage ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-white" />
+                      <span>Copied to Clipboard!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-white" />
+                      <span>Copy Message</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

@@ -152,18 +152,19 @@ export function resetToSeedData(): Booking[] {
   return seed;
 }
 
-export function generateBookingId(existingBookings?: Booking[]): string {
-  const currentList = existingBookings ?? loadBookings();
-  let maxNum = 0;
-  for (const b of currentList) {
-    const match = b.id.match(/^BK-(\d+)$/i);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      if (!isNaN(num) && num > maxNum) {
-        maxNum = num;
-      }
+export function generateBookingId(): string {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let rand = '';
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const array = new Uint8Array(10);
+    crypto.getRandomValues(array);
+    for (let i = 0; i < array.length; i++) {
+      rand += chars[array[i] % chars.length];
+    }
+  } else {
+    for (let i = 0; i < 10; i++) {
+      rand += chars[Math.floor(Math.random() * chars.length)];
     }
   }
-  const nextNum = maxNum + 1;
-  return `BK-${String(nextNum).padStart(4, '0')}`;
+  return `mr_${rand}`;
 }

@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Clock, ShieldCheck, MapPin, Phone, Car, 
   Calendar, CheckCircle2, Navigation, RefreshCw, 
-  User, Info, AlertOctagon, ExternalLink, Sparkles,
-  MessageCircle, Copy, Check
+  User, Info, AlertOctagon, Sparkles, FileText,
+  MessageCircle, Facebook, Copy, Check
 } from 'lucide-react';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -13,16 +13,24 @@ import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly, g
 interface RenterTrackerViewProps {
   booking: Booking | null;
   bookingId?: string | null;
+  onNavigateHome?: () => void;
+  onNavigateAdmin?: () => void;
+  onLookupId?: (id: string) => void;
 }
 
 export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   booking,
   bookingId,
+  onNavigateHome,
+  onNavigateAdmin,
+  onLookupId,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [remoteBooking, setRemoteBooking] = useState<Booking | null>(booking);
   const [isLoading, setIsLoading] = useState(!booking && !!bookingId);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchError, setSearchError] = useState('');
 
   // Precision 1-second live ticker
   useEffect(() => {
@@ -109,8 +117,10 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   const activeBooking = remoteBooking || booking;
 
   const handleCopyLink = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(window.location.href);
+    if (navigator.clipboard && activeBooking) {
+      const trackerKey = activeBooking.trackingToken || activeBooking.id;
+      const trackerUrl = `${window.location.origin}/tracker?id=${encodeURIComponent(trackerKey)}`;
+      navigator.clipboard.writeText(trackerUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     }
@@ -136,36 +146,122 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   }
 
   if (!activeBooking) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-4 shadow-xl">
-          <Car className="w-8 h-8 text-slate-400" />
-        </div>
-        <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Booking Not Found</h1>
-        <p className="text-xs sm:text-sm text-slate-400 mt-2 max-w-sm">
-          This rental tracker identifier could not be located or has expired. Please contact Miranda Rentals and Services for assistance.
-        </p>
+    const handleSearchSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      const clean = searchInput.trim();
+      if (!clean) {
+        setSearchError('Please enter your Booking ID or Tracking Reference');
+        return;
+      }
+      setSearchError('');
+      if (onLookupId) {
+        onLookupId(clean);
+      } else {
+        window.history.pushState({}, '', `/tracker?id=${encodeURIComponent(clean)}`);
+        window.location.reload();
+      }
+    };
 
-        {/* Contact Links */}
-        <div className="mt-8 grid grid-cols-2 gap-2.5 w-full max-w-xs">
-          <a
-            href="https://m.me/1193134077224088"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="py-3 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 sm:p-8">
+        {/* Top Minimal Header */}
+        <div className="max-w-md w-full mx-auto flex items-center justify-between">
+          <button
+            onClick={onNavigateHome}
+            className="flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
           >
-            <MessageCircle className="w-4 h-4" />
-            <span>Messenger</span>
-          </a>
-          <a
-            href="https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="py-3 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2"
-          >
-            <ExternalLink className="w-4 h-4" />
-            <span>Facebook</span>
-          </a>
+            <Car className="w-4 h-4 text-blue-500" />
+            <span>Miranda Rentals</span>
+          </button>
+          {onNavigateHome && (
+            <button
+              onClick={onNavigateHome}
+              className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline underline-offset-4"
+            >
+              Public Calendar
+            </button>
+          )}
+        </div>
+
+        {/* Center Search / Lookup Card */}
+        <div className="max-w-md w-full mx-auto my-auto py-8 text-center space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 mx-auto shadow-xl">
+            <Car className="w-8 h-8 text-blue-500" />
+          </div>
+
+          <div>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Live Rental Tracker</h1>
+            <p className="text-xs sm:text-sm text-slate-400 mt-1.5">
+              {bookingId 
+                ? `Booking "${bookingId}" could not be located. Enter your Booking ID below.`
+                : 'Enter your Booking ID or Tracking Reference to view live rental status.'}
+            </p>
+          </div>
+
+          <form onSubmit={handleSearchSubmit} className="space-y-3 text-left">
+            <div className="relative">
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  if (searchError) setSearchError('');
+                }}
+                placeholder="e.g. MR-1001 or trk_..."
+                className="w-full px-4 py-3.5 bg-slate-900 border border-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl text-base text-white placeholder-slate-500 outline-none transition-all"
+              />
+            </div>
+            {searchError && (
+              <p className="text-xs text-red-400 px-1">{searchError}</p>
+            )}
+            <button
+              type="submit"
+              className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 active:scale-98"
+            >
+              <Navigation className="w-4 h-4" />
+              <span>Track Live Rental</span>
+            </button>
+          </form>
+
+          {/* Friendly Guidance Note */}
+          <div className="p-3.5 bg-slate-900/90 border border-slate-800/90 rounded-xl text-left flex items-start gap-2.5 shadow-xs">
+            <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-slate-300 leading-relaxed">
+              <strong className="text-white font-semibold">Note:</strong> You can find your <span className="text-blue-300 font-mono">Booking ID</span> or <span className="text-blue-300 font-mono">Tracking Reference</span> in the booking confirmation details sent to you. If you haven't received yours yet, please reach out to us via our communication channels below.
+            </p>
+          </div>
+
+          {/* Social / Direct Channels */}
+          <div className="pt-4 border-t border-slate-800/80">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-3">
+              Need assistance with your booking?
+            </span>
+            <div className="grid grid-cols-2 gap-2.5">
+              <a
+                href="https://m.me/1193134077224088"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2.5 px-3 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
+              >
+                <MessageCircle className="w-4 h-4 text-blue-400" />
+                <span>Messenger</span>
+              </a>
+              <a
+                href="https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs rounded-xl transition-all border border-slate-800 flex items-center justify-center gap-2"
+              >
+                <Facebook className="w-4 h-4 text-blue-500" />
+                <span>Facebook</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Footer Note */}
+        <div className="max-w-md w-full mx-auto text-center text-xs text-slate-600 pt-4">
+          <span>Miranda Rentals and Services • Customer Portal</span>
         </div>
       </div>
     );
@@ -219,8 +315,17 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
             </div>
           </div>
 
-          {/* Right Header: Non-wrapping Booking ID Pill + Share Action */}
+          {/* Right Header: Navigation & Non-wrapping Booking ID Pill + Share Action */}
           <div className="flex items-center gap-1.5 shrink-0">
+            {onNavigateHome && (
+              <button
+                onClick={onNavigateHome}
+                className="hidden sm:flex px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-800 transition-colors items-center gap-1 shadow-xs"
+              >
+                <span>Calendar</span>
+              </button>
+            )}
+
             <span className="px-2 py-1 bg-slate-900 text-slate-200 border border-slate-800 rounded-lg text-xs font-mono font-bold whitespace-nowrap shadow-xs">
               {activeBooking.id}
             </span>
@@ -508,6 +613,27 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
                 </div>
               </div>
 
+              {/* Designated Driver Info (for Self-Drive) */}
+              {activeBooking.selfDrive && (
+                <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 text-[10px] uppercase font-mono">Designated Driver</span>
+                    <strong className="text-white text-xs">
+                      {activeBooking.driverName || activeBooking.name}
+                      {activeBooking.renterIsDriver !== false && (
+                        <span className="ml-1.5 text-[10px] text-sky-400 font-normal">(Renter)</span>
+                      )}
+                    </strong>
+                  </div>
+                  {activeBooking.driverBirthdate && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[10px] uppercase font-mono">Driver Birthdate</span>
+                      <span className="font-mono text-slate-200 text-xs">{formatDateOnly(activeBooking.driverBirthdate)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Driver's License Details (Masked for Privacy) */}
               {activeBooking.selfDrive && (licenseNum || licenseExp) && (
                 <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 space-y-1">
@@ -530,7 +656,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400 text-xs">Expiration Date:</span>
                       <span className="font-mono text-slate-300 text-xs">
-                        {licenseExp}
+                        {formatDateOnly(licenseExp)}
                       </span>
                     </div>
                   )}
@@ -538,6 +664,21 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
               )}
             </div>
           </div>
+
+          {/* Notes & Special Instructions Card */}
+          {activeBooking.notes && activeBooking.notes.trim() && (
+            <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg space-y-2.5">
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5">
+                <FileText className="w-4 h-4 text-amber-400" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Rental Notes & Special Instructions
+                </h3>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 font-normal">
+                {activeBooking.notes}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Dedicated Miranda Rentals Reach & Assistance Hub */}
@@ -575,7 +716,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
               rel="noopener noreferrer"
               className="py-3 px-3 sm:px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 hover:text-white font-bold text-xs sm:text-sm rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 shadow-md active:scale-98"
             >
-              <ExternalLink className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <Facebook className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500 shrink-0" />
               <span>Facebook</span>
             </a>
           </div>

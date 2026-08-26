@@ -1,11 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, Calendar, Clock, MapPin, Phone, User, Users, Car, 
-  ShieldCheck, FileText, AlertCircle, Info, Sparkles, Hash
+  ShieldCheck, FileText, AlertCircle, Info, Sparkles, Hash, AlertTriangle
 } from 'lucide-react';
 import { Booking, VehicleType } from '../types';
 import { generateBookingId, getRandomColorTag, generateTrackingToken } from '../utils/storage';
-import { getBookingStartDateTime, getBookingEndDateTime, formatDateTime, toISODateString } from '../utils/dateUtils';
+import { 
+  getBookingStartDateTime, 
+  getBookingEndDateTime, 
+  formatDateTime, 
+  formatDateOnly,
+  toISODateString,
+  checkBookingConflicts
+} from '../utils/dateUtils';
 
 interface BookingFormModalProps {
   isOpen: boolean;
@@ -13,6 +20,7 @@ interface BookingFormModalProps {
   onSubmit: (bookingData: Booking, isOverride?: boolean) => void;
   editingBooking?: Booking | null;
   initialDate?: string; // Pre-fills date when clicking empty calendar slot
+  allBookings?: Booking[];
 }
 
 export const BookingFormModal: React.FC<BookingFormModalProps> = ({
@@ -21,6 +29,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
   onSubmit,
   editingBooking,
   initialDate,
+  allBookings = [],
 }) => {
   const [name, setName] = useState('');
   const [mobileNo, setMobileNo] = useState('');
@@ -28,6 +37,9 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
   const [vehicleModel, setVehicleModel] = useState('Toyota Vios');
   const [plateNumber, setPlateNumber] = useState('');
   const [selfDrive, setSelfDrive] = useState(true);
+  const [renterIsDriver, setRenterIsDriver] = useState(true);
+  const [driverName, setDriverName] = useState('');
+  const [driverBirthdate, setDriverBirthdate] = useState('');
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseExpiration, setLicenseExpiration] = useState('');
   const [passengers, setPassengers] = useState<number>(2);
@@ -49,6 +61,9 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setVehicleModel(editingBooking.vehicleModel || (editingBooking.vehicle === 'Van' ? 'Toyota Hiace Commuter Van' : 'Toyota Vios'));
       setPlateNumber(editingBooking.plateNumber || '');
       setSelfDrive(editingBooking.selfDrive);
+      setRenterIsDriver(editingBooking.renterIsDriver ?? (editingBooking.driverName && editingBooking.driverName !== editingBooking.name ? false : true));
+      setDriverName(editingBooking.driverName || '');
+      setDriverBirthdate(editingBooking.driverBirthdate || '');
 
       // Handle split license fields or backward compatibility from driversLicenseDetails
       if (editingBooking.licenseNumber || editingBooking.licenseExpiration) {
@@ -82,6 +97,9 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setVehicleModel('Toyota Vios');
       setPlateNumber('');
       setSelfDrive(true);
+      setRenterIsDriver(true);
+      setDriverName('');
+      setDriverBirthdate('');
       setLicenseNumber('');
       setLicenseExpiration('');
       setPassengers(2);
@@ -162,6 +180,9 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       vehicleModel: vehicle === 'Car' ? 'Toyota Vios' : 'Toyota Hiace Commuter Van',
       plateNumber: plateNumber.trim(),
       selfDrive: vehicle === 'Van' ? false : selfDrive,
+      renterIsDriver: vehicle === 'Car' && selfDrive ? renterIsDriver : undefined,
+      driverName: vehicle === 'Car' && selfDrive ? (renterIsDriver ? name.trim() : (driverName.trim() || name.trim())) : undefined,
+      driverBirthdate: vehicle === 'Car' && selfDrive ? (driverBirthdate.trim() || undefined) : undefined,
       licenseNumber: vehicle === 'Car' && selfDrive ? licenseNumber.trim() : undefined,
       licenseExpiration: vehicle === 'Car' && selfDrive ? licenseExpiration.trim() : undefined,
       driversLicenseDetails: formattedLicenseDetails,
@@ -183,7 +204,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Real-time calculated end preview
+  // Real-time calculated end preview & conflict check
   let calculatedEndPreview = '';
   if (startDate && startTime && noOfDays >= 1) {
     try {
@@ -193,6 +214,21 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       calculatedEndPreview = '';
     }
   }
+
+  const activeConflict = useMemo(() => {
+    if (!allBookings || allBookings.length === 0 || !startDate || !startTime || !noOfDays) return null;
+    return checkBookingConflicts(
+      {
+        id: editingBooking?.id,
+        startDate,
+        startTime,
+        noOfDays: Number(noOfDays),
+        vehicle,
+      },
+      allBookings,
+      true
+    );
+  }, [allBookings, startDate, startTime, noOfDays, vehicle, editingBooking?.id]);
 
   return (
     <div
@@ -366,9 +402,75 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     </label>
                   </div>
 
-                  {/* Divided License Section: License Number & Expiration Date */}
+                  {/* Divided License & Driver Details Section */}
                   {selfDrive && (
-                    <div className="mt-3 pt-3 border-t border-blue-100 animate-fade-in">
+                    <div className="mt-3 pt-3 border-t border-blue-100 animate-fade-in space-y-3">
+                      {/* Driver Assignment Toggle */}
+                      <div className="flex items-center justify-between p-2.5 bg-white/80 rounded-lg border border-blue-100">
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-blue-600" />
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 block">Renter is the Designated Driver</span>
+                            <span className="text-[11px] text-slate-500">Auto-fill driver name using customer profile</span>
+                          </div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            id="booking-renter-driver-toggle"
+                            type="checkbox"
+                            checked={renterIsDriver}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setRenterIsDriver(checked);
+                              if (checked) {
+                                setDriverName(name);
+                              }
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+
+                      {/* Driver Name and Birthdate Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Driver Name Field */}
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-blue-600" />
+                            Driver Full Name
+                          </label>
+                          <input
+                            id="booking-driver-name-input"
+                            type="text"
+                            value={renterIsDriver ? (name || 'Same as Renter') : driverName}
+                            onChange={(e) => setDriverName(e.target.value)}
+                            disabled={renterIsDriver}
+                            placeholder="e.g. Maria Santos"
+                            className={`w-full px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                              renterIsDriver ? 'bg-slate-100/80 text-slate-500 cursor-not-allowed border-slate-200' : 'border-slate-200 text-slate-900'
+                            }`}
+                          />
+                        </div>
+
+                        {/* Driver Birthdate Field */}
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                            Driver Birthdate
+                          </label>
+                          <input
+                            id="booking-driver-birthdate-input"
+                            type="date"
+                            value={driverBirthdate}
+                            onChange={(e) => setDriverBirthdate(e.target.value)}
+                            max={new Date().toISOString().split('T')[0]}
+                            className="w-full px-3 py-2.5 text-base sm:text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
+                          />
+                        </div>
+                      </div>
+
+                      {/* License Number & Expiration Date */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {/* License Number Field */}
                         <div>
@@ -561,6 +663,29 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                 <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700">
                   {noOfDays * 24} Hours Total
                 </span>
+              </div>
+            )}
+
+            {/* Real-time Conflict Overlap Warning */}
+            {activeConflict?.hasConflict && (
+              <div className="mt-3 p-3 bg-red-50 border border-red-300 rounded-lg text-xs text-red-900 space-y-1.5 animate-fade-in">
+                <div className="flex items-center gap-1.5 font-bold text-red-950">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>Schedule Conflict: Overlapping Booking Detected</span>
+                </div>
+                <p className="text-[11px] text-red-800 leading-relaxed">
+                  This {vehicle} already has active reservations during the requested period. Only consecutive available dates should be booked:
+                </p>
+                <div className="space-y-1 pt-1 border-t border-red-200/70">
+                  {activeConflict.conflictingBookings.map((cb) => (
+                    <div key={cb.id} className="text-[11px] font-mono text-red-900 flex items-center justify-between">
+                      <span className="font-bold">{cb.name}</span>
+                      <span>
+                        {formatDateOnly(cb.startDate)} ({cb.noOfDays} day{cb.noOfDays > 1 ? 's' : ''})
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

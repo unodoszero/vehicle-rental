@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Car, Plus, RotateCcw, ExternalLink, Sparkles, Clock, 
-  Calendar, ShieldAlert, ChevronDown, Cloud, CloudOff, Download, Upload, Database,
+  Car, Plus, RotateCcw, Sparkles, Clock, 
+  Search, ShieldAlert, ChevronDown, Cloud, CloudOff, Download, Upload, Database,
   Lock, KeyRound
 } from 'lucide-react';
 import { Booking } from '../types';
@@ -110,13 +110,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14 sm:h-16 gap-2">
           {/* Brand & Operational Title */}
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             <div className="w-7 h-7 sm:w-8 sm:h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm shadow-blue-600/30 shrink-0">
               <Car className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
             </div>
             <div className="min-w-0">
               <span className="text-xs sm:text-base font-bold tracking-tight text-slate-900 block leading-tight truncate">
-                Miranda Rentals
+                Miranda Rentals & Services
               </span>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="px-1 sm:px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
@@ -150,21 +150,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="font-bold text-slate-900">{formatTimeOnly(currentTime)}</span>
             </div>
 
-            {/* Public Availability Calendar button */}
-            {onOpenPublicCalendar && (
-              <button
-                id="navbar-public-calendar-btn"
-                type="button"
-                onClick={onOpenPublicCalendar}
-                className="p-2 sm:px-3 sm:py-2 text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100/80 border border-blue-200 rounded-lg transition-all flex items-center gap-1.5"
-                title="Preview public availability calendar for renters"
-              >
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                <span className="hidden sm:inline">Public Calendar</span>
-              </button>
-            )}
-
-            {/* Public Tracker Quick Preview Dropdown */}
+            {/* Tracker Dropdown Trigger Button - Search icon on mobile */}
             <div className="relative">
               <button
                 id="tracker-preview-dropdown-btn"
@@ -173,12 +159,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   setIsTrackerDropdownOpen(!isTrackerDropdownOpen);
                   setIsDataMenuOpen(false);
                 }}
-                className="p-2 sm:px-3 sm:py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/70 rounded-lg transition-all flex items-center gap-1"
-                title="Preview public renter trackers"
+                className="p-2 sm:px-3 sm:py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/70 rounded-lg transition-all flex items-center gap-1 active:scale-95"
+                title="Renter Trackers"
               >
-                <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden md:inline">Renter Trackers</span>
-                <ChevronDown className="w-3 h-3 text-slate-400" />
+                <Search className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                <span className="hidden sm:inline">Tracker</span>
+                <ChevronDown className="w-3 h-3 text-slate-400 hidden sm:inline" />
               </button>
 
               {isTrackerDropdownOpen && (

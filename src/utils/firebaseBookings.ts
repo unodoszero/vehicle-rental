@@ -70,15 +70,39 @@ export function subscribeToBookings(
 }
 
 /**
+ * Recursively cleans an object so that no `undefined` values are passed to Firestore setDoc/updateDoc
+ */
+export function sanitizePayload<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return null as unknown as T;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizePayload(item)) as unknown as T;
+  }
+  if (typeof obj === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        cleaned[key] = typeof value === 'object' && value !== null
+          ? sanitizePayload(value)
+          : value;
+      }
+    }
+    return cleaned as T;
+  }
+  return obj;
+}
+
+/**
  * Saves or updates a single booking in Firestore.
  * Works seamlessly offline (queued locally by Firestore) and online.
  */
 export async function saveBookingToFirestore(booking: Booking): Promise<void> {
   const docRef = doc(db, BOOKINGS_COLLECTION, booking.id);
-  const cleanData: Booking = {
+  const cleanData: Booking = sanitizePayload({
     ...booking,
     updatedAt: new Date().toISOString(),
-  };
+  });
 
   // Immediate save to firestore (works offline with persistent cache)
   await setDoc(docRef, cleanData, { merge: true });
@@ -135,7 +159,8 @@ export async function importBookingsToFirestore(importedList: Booking[]): Promis
   for (const b of importedList) {
     if (!b.id) continue;
     const docRef = doc(db, BOOKINGS_COLLECTION, b.id);
-    batch.set(docRef, b, { merge: true });
+    const cleanBooking = sanitizePayload(b);
+    batch.set(docRef, cleanBooking, { merge: true });
   }
 
   await batch.commit();

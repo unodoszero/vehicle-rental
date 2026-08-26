@@ -1,15 +1,25 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Car, ChevronLeft, ChevronRight, 
-  MessageCircle, ExternalLink, Copy, Check,
-  FileText, Fuel, CreditCard, ShieldCheck, Filter,
-  Lock, Search, Share2, Facebook
+  MessageCircle, Copy, Check,
+  FileText, Fuel, CreditCard, ShieldCheck,
+  Search, Share2, AlertTriangle, XCircle,
+  FileCheck, UserCheck, ShieldAlert, Download,
+  Radio, AlertOctagon, ExternalLink
 } from 'lucide-react';
 import { Booking, VehicleType } from '../types';
+
+// Placeholder link storage for Rental Agreement PDF - replace with your Google Drive / Cloud storage link
+const RENTAL_AGREEMENT_PDF_URL = "https://storage.googleapis.com/miranda-rentals-public/Miranda_Rentals_Agreement_Form_Placeholder.pdf";
 import { 
   getMonthCalendarGrid, 
   getBookingStartDateTime, 
-  getBookingEndDateTime 
+  getBookingEndDateTime,
+  formatDateOnly,
+  formatFullDate,
+  isDayBookedForFilter,
+  isDateRangeConsecutivelyAvailable,
+  getFirstBlockedDateAfter
 } from '../utils/dateUtils';
 
 interface PublicAvailabilityCalendarProps {
@@ -22,7 +32,6 @@ interface PublicAvailabilityCalendarProps {
 export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProps> = ({
   bookings,
   onOpenTrackerLookup,
-  onOpenAdminLogin,
 }) => {
   // Navigation & Date State
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
@@ -31,8 +40,10 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
   // Date Selection for Renters
   const [selectedStartDate, setSelectedStartDate] = useState<string | null>(null);
   const [selectedEndDate, setSelectedEndDate] = useState<string | null>(null);
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [copiedInquiry, setCopiedInquiry] = useState(false);
   const [copiedShareLink, setCopiedShareLink] = useState(false);
+  const [rangeWarning, setRangeWarning] = useState<string | null>(null);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -58,80 +69,76 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     setCurrentDate(new Date());
   };
 
-  // Filter bookings based on vehicle category (exclude cancelled bookings)
+  // Filter bookings based on vehicle category
   const filteredBookings = useMemo(() => {
-    const active = bookings.filter((b) => b.status !== 'Cancelled');
-    if (vehicleFilter === 'all') return active;
-    return active.filter((b) => b.vehicle === vehicleFilter);
+    if (vehicleFilter === 'all') return bookings;
+    return bookings.filter((b) => b.vehicle === vehicleFilter);
   }, [bookings, vehicleFilter]);
 
-  // Compute status for each day
-  // Rule: When a date has been booked, the last date (return/checkout day) is the only booked date that can be clicked for new booking.
+  // Compute status for each day using centralized utility
   const getDayAvailability = (dateString: string) => {
-    const carBookings = filteredBookings.filter((b) => {
-      if (b.vehicle !== 'Car') return false;
-      const targetDayStart = new Date(`${dateString}T00:00:00`).getTime();
-      const targetDayEnd = new Date(`${dateString}T23:59:59.999`).getTime();
-      const start = getBookingStartDateTime(b).getTime();
-      const end = getBookingEndDateTime(b).getTime();
-      return start <= targetDayEnd && end >= targetDayStart;
-    });
-
-    const vanBookings = filteredBookings.filter((b) => {
-      if (b.vehicle !== 'Van') return false;
-      const targetDayStart = new Date(`${dateString}T00:00:00`).getTime();
-      const targetDayEnd = new Date(`${dateString}T23:59:59.999`).getTime();
-      const start = getBookingStartDateTime(b).getTime();
-      const end = getBookingEndDateTime(b).getTime();
-      return start <= targetDayEnd && end >= targetDayStart;
-    });
-
-    const carBooked = carBookings.length > 0;
-    const vanBooked = vanBookings.length > 0;
-
-    // A vehicle booking blocks the date if the date is BEFORE the booking's end date (i.e. start day or middle day)
-    const carIsBlocked = carBookings.some((b) => dateString < b.endDate);
-    const carIsLastDay = carBooked && !carIsBlocked;
-
-    const vanIsBlocked = vanBookings.some((b) => dateString < b.endDate);
-    const vanIsLastDay = vanBooked && !vanIsBlocked;
-
-    let isClickable = true;
-    if (vehicleFilter === 'Car') {
-      isClickable = !carIsBlocked; // Clickable if not booked, OR if it's the last day of booking
-    } else if (vehicleFilter === 'Van') {
-      isClickable = !vanIsBlocked; // Clickable if not booked, OR if it's the last day of booking
-    } else {
-      // 'all': Clickable if at least one vehicle category is available or on return day
-      isClickable = !carIsBlocked || !vanIsBlocked;
-    }
-
-    return {
-      isBooked: carBooked || vanBooked,
-      carBooked,
-      vanBooked,
-      carIsLastDay,
-      vanIsLastDay,
-      isClickable,
-      bookingCount: carBookings.length + vanBookings.length,
-    };
+    return isDayBookedForFilter(dateString, filteredBookings, vehicleFilter);
   };
 
-  // Date click logic
+  // Date click logic - Enforces strictly consecutive available days
   const handleDayClick = (dateString: string, isPast: boolean, isClickable: boolean) => {
     if (isPast || !isClickable) return;
+    setRangeWarning(null);
 
+    // Case 1: First click or resetting after full range
     if (!selectedStartDate || (selectedStartDate && selectedEndDate)) {
       setSelectedStartDate(dateString);
       setSelectedEndDate(null);
-    } else {
-      if (dateString < selectedStartDate) {
-        setSelectedStartDate(dateString);
-        setSelectedEndDate(null);
-      } else {
-        setSelectedEndDate(dateString);
-      }
+      return;
     }
+
+    // Case 2: User clicked an earlier date or same date -> Reset start date
+    if (dateString <= selectedStartDate) {
+      setSelectedStartDate(dateString);
+      setSelectedEndDate(null);
+      return;
+    }
+
+    // Case 3: User clicked a later date as End Date -> Validate that every single day in between is available
+    const rangeCheck = isDateRangeConsecutivelyAvailable(
+      selectedStartDate,
+      dateString,
+      filteredBookings,
+      vehicleFilter
+    );
+
+    if (!rangeCheck.isConsecutiveAvailable) {
+      // Range contains one or more booked days
+      const blockedDateFormatted = rangeCheck.blockedDate ? formatDateOnly(rangeCheck.blockedDate) : 'intermediate dates';
+      setRangeWarning(
+        `Cannot select across booked dates (${blockedDateFormatted} is already reserved). You can only select consecutive available days.`
+      );
+      // Reset start to newly clicked date
+      setSelectedStartDate(dateString);
+      setSelectedEndDate(null);
+    } else {
+      setSelectedEndDate(dateString);
+    }
+  };
+
+  // Selection range highlighter with boundary check
+  const isDayInSelectionRange = (dateString: string) => {
+    if (!selectedStartDate) return false;
+
+    // Fixed completed range
+    if (selectedStartDate && selectedEndDate) {
+      return dateString >= selectedStartDate && dateString <= selectedEndDate;
+    }
+
+    // Interactive hover state: Stop highlighting if hover crosses a booked day
+    if (selectedStartDate && !selectedEndDate && hoverDate && hoverDate >= selectedStartDate) {
+      const blocked = getFirstBlockedDateAfter(selectedStartDate, filteredBookings, vehicleFilter);
+      const effectiveHover = blocked && hoverDate >= blocked ? null : hoverDate;
+      if (!effectiveHover) return dateString === selectedStartDate;
+      return dateString >= selectedStartDate && dateString <= effectiveHover;
+    }
+
+    return dateString === selectedStartDate;
   };
 
   const selectedDurationDays = useMemo(() => {
@@ -143,19 +150,19 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     return Math.max(1, diff + 1);
   }, [selectedStartDate, selectedEndDate]);
 
-  // Generate Inquiry Message
+  // Generate Inquiry Message with full Month D, YYYY format
   const inquiryMessage = useMemo(() => {
-    const vehicleText = vehicleFilter === 'all' ? 'Car / Van' : vehicleFilter;
-    if (selectedStartDate && selectedEndDate) {
-      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} from ${selectedStartDate} to ${selectedEndDate} (${selectedDurationDays} days). Are these dates available for reservation?`;
+    const vehicleText = vehicleFilter === 'all' ? 'Car' : vehicleFilter;
+    if (selectedStartDate && selectedEndDate && selectedStartDate !== selectedEndDate) {
+      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} from ${formatFullDate(selectedStartDate)} to ${formatFullDate(selectedEndDate)} (${selectedDurationDays} Day/s). Can I confirm these dates are available for reservation?`;
     } else if (selectedStartDate) {
-      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} starting on ${selectedStartDate}. Are these dates available for reservation?`;
+      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} for ${formatFullDate(selectedStartDate)} (1 Day/s). Can I confirm these dates are available for reservation?`;
     }
     return `Hi Miranda Rentals and Services! I would like to inquire about available dates for booking a ${vehicleText}.`;
   }, [selectedStartDate, selectedEndDate, selectedDurationDays, vehicleFilter]);
 
-  const FB_PAGE_URL = 'https://www.facebook.com/mirandarentals';
-  const MESSENGER_URL = `https://m.me/mirandarentals?text=${encodeURIComponent(inquiryMessage)}`;
+  const FB_PAGE_URL = 'https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr';
+  const MESSENGER_URL = `https://m.me/1193134077224088?text=${encodeURIComponent(inquiryMessage)}`;
 
   const handleCopyInquiry = () => {
     navigator.clipboard.writeText(inquiryMessage);
@@ -163,11 +170,32 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     setTimeout(() => setCopiedInquiry(false), 2500);
   };
 
-  const handleShareCalendar = () => {
-    const url = `${window.location.origin}${window.location.pathname}?view=calendar`;
-    navigator.clipboard.writeText(url);
-    setCopiedShareLink(true);
-    setTimeout(() => setCopiedShareLink(false), 2500);
+  // Open gadget OS native share (iPhone / Android / Mac / Windows share sheet)
+  const handleShareCalendar = async () => {
+    const shareUrl = `${window.location.origin}/`;
+    const shareData = {
+      title: 'Miranda Rentals and Services',
+      text: 'Check vehicle availability and reserve your rental online with Miranda Rentals and Services.',
+      url: shareUrl,
+    };
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share(shareData);
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          // If native share fails or is blocked, fallback to clipboard
+          navigator.clipboard.writeText(shareUrl);
+          setCopiedShareLink(true);
+          setTimeout(() => setCopiedShareLink(false), 2500);
+        }
+      }
+    } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      // Fallback for browsers without Web Share API
+      navigator.clipboard.writeText(shareUrl);
+      setCopiedShareLink(true);
+      setTimeout(() => setCopiedShareLink(false), 2500);
+    }
   };
 
   return (
@@ -176,39 +204,34 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
       {/* Top Clean White Navbar */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-8 py-3.5 shadow-xs">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
-          {/* Brand */}
+          {/* Brand - Just Miranda Rentals and Services */}
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shrink-0">
               <Car className="w-5 h-5" />
             </div>
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 block leading-tight">
-                Miranda Rentals and Services
-              </span>
-              <span className="text-sm font-bold text-slate-900 tracking-tight leading-tight block">
-                Calendar
-              </span>
-            </div>
+            <span className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight">
+              Miranda Rentals and Services
+            </span>
           </div>
 
-          {/* Action Links */}
+          {/* Action Links: OS Native Share & Track Booking */}
           <div className="flex items-center gap-2">
             <button
               id="public-share-link-btn"
               type="button"
               onClick={handleShareCalendar}
-              className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 transition-all flex items-center gap-1.5 shadow-xs"
-              title="Copy Public Calendar URL"
+              className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 transition-all flex items-center gap-1.5 shadow-xs active:scale-95"
+              title="Share Page"
             >
               {copiedShareLink ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="hidden sm:inline text-emerald-700">Link Copied</span>
+                  <span className="text-emerald-700">Link Copied</span>
                 </>
               ) : (
                 <>
-                  <Share2 className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="hidden sm:inline">Share Calendar</span>
+                  <Share2 className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Share</span>
                 </>
               )}
             </button>
@@ -218,22 +241,10 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                 id="public-open-tracker-btn"
                 type="button"
                 onClick={onOpenTrackerLookup}
-                className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 transition-all flex items-center gap-1.5 shadow-xs"
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 transition-all flex items-center gap-1.5 shadow-xs"
               >
                 <Search className="w-3.5 h-3.5 text-blue-600" />
                 <span className="hidden sm:inline">Track Booking</span>
-              </button>
-            )}
-
-            {onOpenAdminLogin && (
-              <button
-                id="public-open-admin-btn"
-                type="button"
-                onClick={onOpenAdminLogin}
-                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 shadow-xs"
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Admin Access</span>
               </button>
             )}
           </div>
@@ -243,43 +254,19 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
       {/* Main Container */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         
-        {/* Banner with Direct Channels */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+        {/* Welcome Banner & Vehicle Schedule Info */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-2">
           <div className="space-y-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 block">
+              Welcome to Miranda Rentals and Services
+            </span>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Vehicle Schedule & Booking Availability
+              Vehicle Schedule Calendar
             </h1>
-            <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
-              Check open dates on our calendar below. Select your target start and return dates to easily inquire and reserve via Facebook Messenger.
-            </p>
           </div>
-
-          {/* Symmetrical Contact Buttons (Equal width & height) */}
-          <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto shrink-0">
-            <a
-              id="header-messenger-btn"
-              href={MESSENGER_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="h-10 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 min-w-[130px]"
-            >
-              <MessageCircle className="w-4 h-4 shrink-0" />
-              <span>Messenger</span>
-              <ExternalLink className="w-3 h-3 text-blue-200 shrink-0" />
-            </a>
-
-            <a
-              id="header-fb-page-btn"
-              href={FB_PAGE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="h-10 px-4 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 min-w-[130px]"
-            >
-              <Facebook className="w-4 h-4 text-blue-600 shrink-0" />
-              <span>FB Page</span>
-              <ExternalLink className="w-3 h-3 text-slate-400 shrink-0" />
-            </a>
-          </div>
+          <p className="text-xs sm:text-sm text-slate-600 max-w-3xl leading-relaxed">
+            Check open dates on our calendar below. Select your target start and return dates to easily inquire and reserve via Facebook and Messenger.
+          </p>
         </div>
 
         {/* Calendar Section */}
@@ -362,15 +349,15 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
           </div>
 
-          {/* Symmetrical Color Legends (Symmetric 4-part grid division) */}
+          {/* Symmetrical Color Legends (Red for Booked, Green for Available, Blue for Selected, Yellow for Today) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-700">
             <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100 shrink-0" />
-              <span className="font-semibold text-emerald-800 text-center truncate">Available Date</span>
+              <span className="font-semibold text-emerald-800 text-center truncate">Available</span>
             </div>
             <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-100 shrink-0" />
-              <span className="font-semibold text-rose-800 text-center truncate">Booked / Reserved</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-100 shrink-0" />
+              <span className="font-semibold text-red-700 text-center truncate">Booked</span>
             </div>
             <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-amber-100 shrink-0" />
@@ -401,26 +388,28 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                 const dayStatus = getDayAvailability(day.dateString);
                 const isSelectedStart = selectedStartDate === day.dateString;
                 const isSelectedEnd = selectedEndDate === day.dateString;
-                const isInSelectedRange = 
-                  selectedStartDate && 
-                  selectedEndDate && 
-                  day.dateString >= selectedStartDate && 
-                  day.dateString <= selectedEndDate;
+                const isInSelectedRange = isDayInSelectionRange(day.dateString);
 
                 let bgClass = 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800 shadow-2xs';
                 let textClass = day.isCurrentMonth ? 'text-slate-800' : 'text-slate-300';
 
                 if (day.isPast) {
                   bgClass = 'bg-slate-100/70 border-slate-200/60 opacity-50 cursor-not-allowed';
-                } else if (isInSelectedRange || isSelectedStart || isSelectedEnd) {
-                  bgClass = 'bg-blue-50 border-blue-500 ring-2 ring-blue-500 text-blue-900';
+                } else if (isSelectedStart || isSelectedEnd) {
+                  bgClass = 'bg-blue-600 text-white font-bold ring-2 ring-blue-500 shadow-md shadow-blue-500/20';
+                  textClass = 'text-white';
+                } else if (isInSelectedRange) {
+                  bgClass = 'bg-blue-50/90 border-blue-300 text-blue-900 font-semibold';
+                  textClass = 'text-blue-950';
+                } else if (day.isToday) {
+                  // Today is the ONLY date with an amber border
+                  bgClass = !dayStatus.isClickable 
+                    ? 'bg-red-50/50 border-2 border-amber-400 text-red-900 cursor-not-allowed shadow-xs'
+                    : 'bg-amber-50/40 border-2 border-amber-400 text-slate-900 hover:border-amber-500 cursor-pointer shadow-xs';
                 } else if (!dayStatus.isClickable) {
-                  bgClass = 'bg-rose-50/60 border-rose-200 opacity-60 cursor-not-allowed';
-                } else if (dayStatus.isBooked) {
-                  // The last day of booking is clickable for a new reservation
-                  bgClass = 'bg-white hover:bg-slate-50 border-amber-300 hover:border-blue-400 cursor-pointer shadow-xs';
+                  bgClass = 'bg-red-50/50 border border-red-200/80 text-red-900 cursor-not-allowed';
                 } else if (day.isCurrentMonth) {
-                  bgClass = 'bg-white hover:bg-slate-50 border-slate-200 hover:border-blue-400 cursor-pointer';
+                  bgClass = 'bg-white hover:bg-slate-50 border border-slate-200 hover:border-blue-400 cursor-pointer';
                 }
 
                 return (
@@ -429,58 +418,70 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                     type="button"
                     disabled={day.isPast || !dayStatus.isClickable}
                     onClick={() => handleDayClick(day.dateString, day.isPast, dayStatus.isClickable)}
-                    className={`min-h-[70px] sm:min-h-[88px] p-1.5 sm:p-2 rounded-xl border flex flex-col justify-between text-left transition-all relative overflow-hidden ${bgClass}`}
+                    onMouseEnter={() => setHoverDate(day.dateString)}
+                    className={`min-h-[56px] sm:min-h-[92px] p-1 sm:p-2 rounded-xl flex flex-col justify-between text-left transition-all relative overflow-hidden ${bgClass}`}
                   >
-                    {/* Header: Clean Day number (Today pill removed to avoid clipping) */}
-                    <div className="flex items-center justify-between">
+                    {/* Header: Day number */}
+                    <div className="flex items-center justify-between w-full">
                       <span
-                        className={`text-xs sm:text-sm font-bold ${textClass} ${
-                          day.isToday ? 'text-blue-600 ring-1 ring-blue-400 bg-blue-50 px-1.5 py-0.5 rounded-md' : ''
+                        className={`text-xs sm:text-sm font-bold ${
+                          isSelectedStart || isSelectedEnd
+                            ? 'text-white'
+                            : day.isToday
+                            ? 'text-amber-900 ring-1 ring-amber-400 bg-amber-100/90 px-1 sm:px-1.5 py-0.5 rounded-md'
+                            : textClass
                         }`}
                       >
                         {day.dayOfMonth}
                       </span>
                     </div>
 
-                    {/* Booking badge indicators */}
-                    <div className="space-y-1 my-auto">
-                      {dayStatus.isBooked ? (
-                        <div className="space-y-1">
+                    {/* Middle: Centered Status Legend Dot */}
+                    {day.isCurrentMonth && !day.isPast && (
+                      <div className="my-auto flex items-center justify-center pointer-events-none py-0.5">
+                        {dayStatus.isBooked ? (
+                          <span className="w-2 h-2 rounded-full bg-red-500 ring-2 ring-red-200" title="Booked" />
+                        ) : isInSelectedRange || isSelectedStart || isSelectedEnd ? (
+                          <span className={`w-2 h-2 rounded-full ${isSelectedStart || isSelectedEnd ? 'bg-white' : 'bg-blue-500'}`} />
+                        ) : (
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-100" title="Available" />
+                        )}
+                      </div>
+                    )}
+
+                    {/* Booking badge indicators / Selection status marker (Desktop only - No text on mobile dates) */}
+                    <div className="hidden sm:block space-y-0.5 w-full">
+                      {isSelectedStart || isSelectedEnd ? (
+                        <div className="text-[10px] font-bold text-center px-1 py-0.5 rounded bg-white/20 text-white truncate">
+                          {isSelectedStart && isSelectedEnd ? (
+                            <span>Selected</span>
+                          ) : isSelectedStart ? (
+                            <span>Start</span>
+                          ) : (
+                            <span>End</span>
+                          )}
+                        </div>
+                      ) : dayStatus.isBooked ? (
+                        <div className="space-y-0.5">
                           {dayStatus.carBooked && (vehicleFilter === 'all' || vehicleFilter === 'Car') && (
-                            <div className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 truncate ${
-                              dayStatus.carIsLastDay 
-                                ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                                : 'bg-rose-100 text-rose-700 border border-rose-200'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dayStatus.carIsLastDay ? 'bg-amber-600' : 'bg-rose-600'}`} />
-                              <span className="truncate">{dayStatus.carIsLastDay ? 'Car Return' : 'Car Booked'}</span>
+                            <div className="px-1 py-0.5 rounded text-[10px] font-bold flex items-center justify-start gap-1 truncate bg-red-100 text-red-700 border border-red-200">
+                              <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-red-600" />
+                              <span className="truncate">Car Booked</span>
                             </div>
                           )}
                           {dayStatus.vanBooked && (vehicleFilter === 'all' || vehicleFilter === 'Van') && (
-                            <div className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 truncate ${
-                              dayStatus.vanIsLastDay 
-                                ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                                : 'bg-rose-100 text-rose-700 border border-rose-200'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dayStatus.vanIsLastDay ? 'bg-amber-600' : 'bg-rose-600'}`} />
-                              <span className="truncate">{dayStatus.vanIsLastDay ? 'Van Return' : 'Van Booked'}</span>
+                            <div className="px-1 py-0.5 rounded text-[10px] font-bold flex items-center justify-start gap-1 truncate bg-red-100 text-red-700 border border-red-200">
+                              <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-red-600" />
+                              <span className="truncate">Van Booked</span>
                             </div>
                           )}
                         </div>
                       ) : !day.isPast && day.isCurrentMonth ? (
-                        <div className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                          <span className="hidden sm:inline">Available</span>
+                        <div className="text-[9px] text-emerald-700 font-semibold flex items-center justify-center gap-1">
+                          <span>Available</span>
                         </div>
                       ) : null}
                     </div>
-
-                    {/* Selection status marker - compact Start/End for mobile */}
-                    {(isSelectedStart || isSelectedEnd) && (
-                      <div className="text-[9px] sm:text-[10px] font-bold text-blue-700 bg-blue-100/90 border border-blue-200 px-1 py-0.5 rounded text-center truncate shadow-2xs">
-                        {isSelectedStart && isSelectedEnd ? 'Start/End' : isSelectedStart ? 'Start' : 'End'}
-                      </div>
-                    )}
                   </button>
                 );
               })}
@@ -488,19 +489,44 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
           </div>
         </div>
 
+        {/* Range Conflict Alert Banner */}
+        {rangeWarning && (
+          <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-amber-900 shadow-xs animate-fade-in">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-bold text-amber-950">Invalid Date Selection: </strong>
+                <span>{rangeWarning}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRangeWarning(null)}
+              className="text-amber-600 hover:text-amber-900 p-0.5 rounded-md hover:bg-amber-100/60 transition-colors"
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Selected Dates Booking & Inquiry Box */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
             <div className="space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 block">
-                Instant Booking Inquiry
+                Booking Inquiry
               </span>
               <h2 className="text-base sm:text-lg font-bold text-slate-900">
                 {selectedStartDate ? (
                   <span>
-                    Selected Dates: <span className="text-blue-600 font-mono">{selectedStartDate}</span>
-                    {selectedEndDate && (
-                      <> to <span className="text-blue-600 font-mono">{selectedEndDate}</span> ({selectedDurationDays} Days)</>
+                    {(!selectedEndDate || selectedStartDate === selectedEndDate) ? (
+                      <>
+                        Selected Date: <span className="text-blue-600 font-mono">{formatFullDate(selectedStartDate)}</span> (1 Day/s)
+                      </>
+                    ) : (
+                      <>
+                        Selected Dates: <span className="text-blue-600 font-mono">{formatFullDate(selectedStartDate)}</span> to <span className="text-blue-600 font-mono">{formatFullDate(selectedEndDate)}</span> ({selectedDurationDays} Day/s)
+                      </>
                     )}
                   </span>
                 ) : (
@@ -512,7 +538,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
               </p>
             </div>
 
-            {/* Symmetrical Action Buttons (Inquire on messenger & copy text div) */}
+            {/* Symmetrical Action Buttons without redirect arrows */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full md:w-auto shrink-0">
               <a
                 id="messenger-inquire-cta-btn"
@@ -523,7 +549,6 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
               >
                 <MessageCircle className="w-4 h-4 shrink-0" />
                 <span>Inquire on Messenger</span>
-                <ExternalLink className="w-3.5 h-3.5 text-blue-200 shrink-0" />
               </a>
 
               <button
@@ -558,64 +583,173 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
           </div>
         </div>
 
-        {/* Essential Rental Requirements (Symmetrical 4-Card Grid) */}
+        {/* SECTION 1: Essential Rental Requirements */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-              <FileText className="w-4 h-4" />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <FileCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                  Essential Rental Requirements
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Please prepare and submit these necessary documents upon booking reservation
+                </p>
+              </div>
+            </div>
+
+            {/* Placeholder Link for Agreement Form PDF */}
+            <a
+              href={RENTAL_AGREEMENT_PDF_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-slate-700 hover:text-blue-700 text-xs font-bold rounded-xl transition-all shadow-2xs group shrink-0"
+              title="Download official rental agreement form"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-600 group-hover:scale-110 transition-transform" />
+              <span>Download Agreement Form (PDF)</span>
+              <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-blue-500" />
+            </a>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            {/* Req 1 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-blue-700 text-xs font-bold mb-1">
+                  <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>1. Reservation Form</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Duly filled-out reservation form detailing trip itinerary, dates, and primary contact info.
+                </p>
+              </div>
+              <span className="text-[10px] font-semibold text-slate-400 block pt-1 border-t border-slate-200/60">
+                Booking Information
+              </span>
+            </div>
+
+            {/* Req 2 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-blue-700 text-xs font-bold mb-1">
+                  <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>2. Driver’s License</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Valid Non-Professional or Professional driver’s license to confirm driving capability.
+                </p>
+              </div>
+              <span className="text-[10px] font-semibold text-slate-400 block pt-1 border-t border-slate-200/60">
+                Driver Capability Verification
+              </span>
+            </div>
+
+            {/* Req 3 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-blue-700 text-xs font-bold mb-1">
+                  <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>3. Valid Government ID</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  One primary valid government ID (Passport, UMID, SSS, PhilID, PRC) to confirm legitimacy.
+                </p>
+              </div>
+              <span className="text-[10px] font-semibold text-slate-400 block pt-1 border-t border-slate-200/60">
+                Identity Authentication
+              </span>
+            </div>
+
+            {/* Req 4 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-blue-700 text-xs font-bold mb-1">
+                  <FileCheck className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>4. Signed Agreement</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Signed contract acknowledging terms. Electronic signatures (E-signature) are fully accepted.
+                </p>
+              </div>
+              <span className="text-[10px] font-semibold text-slate-400 block pt-1 border-t border-slate-200/60">
+                E-Signatures Accepted
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION 2: Guidelines & Policies */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100">
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-4 h-4" />
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                Essential Rental Requirements & Guidelines
+                Rental Guidelines & Policies
               </h3>
               <p className="text-xs text-slate-500">
-                Please prepare the following requirements upon reservation
+                Important rules, responsibilities, and terms for all renters and drivers
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-1">
-            {/* Card 1 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {/* Guide 1 */}
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
-                <ShieldCheck className="w-4 h-4" />
-                <span>1. Driver's License</span>
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+                <CreditCard className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Security Deposit</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Non-Pro or Professional Driver's License for self-drive rentals.
+                A refundable security deposit is collected before turnover and returned in full upon vehicle checkout after inspection.
               </p>
             </div>
 
-            {/* Card 2 */}
+            {/* Guide 2 */}
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
-                <FileText className="w-4 h-4" />
-                <span>2. Valid Government ID</span>
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+                <Fuel className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Fuel Policy</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                1 primary ID (Passport, UMID, SSS, PhilID, or PRC).
+                Same-to-Same fuel policy. The vehicle must be returned with the exact same fuel level recorded during vehicle release.
               </p>
             </div>
 
-            {/* Card 3 */}
+            {/* Guide 3 */}
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
-                <CreditCard className="w-4 h-4" />
-                <span>3. Security Deposit</span>
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+                <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Damage Accountability</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Refundable security deposit returned upon vehicle checkout.
+                The renter assumes full accountability for any collision damage, scratches, dents, stained interiors, or mechanical issues sustained.
               </p>
             </div>
 
-            {/* Card 4 */}
+            {/* Guide 4 */}
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-blue-700 text-xs font-bold">
-                <Fuel className="w-4 h-4" />
-                <span>4. Fuel Policy</span>
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+                <Radio className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>OR/CR & RFID Security Responsibility</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Same-to-Same fuel return policy across all fleet units.
+                The renter is responsible for safekeeping the vehicle OR/CR copy and toll RFID cards (Autosweep/Easytrip). Loss will incur replacement fees.
+              </p>
+            </div>
+
+            {/* Guide 5 */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 md:col-span-2 lg:col-span-2">
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+                <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Limitation of Liability & Accident Waiver</span>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Miranda Rentals and Services is not liable for any accidents, third-party injuries/property damage, traffic citations, or travel delays/inconveniences caused during the use of our vehicle. Renter assumes complete operational responsibility.
               </p>
             </div>
           </div>
@@ -623,7 +757,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
       </main>
 
-      {/* Clean Footer (Individual rows on mobile as requested) */}
+      {/* Clean Footer */}
       <footer className="border-t border-slate-200 bg-white py-6 px-4 text-center text-xs text-slate-600 mt-auto">
         <div className="max-w-4xl mx-auto space-y-2">
           <p className="font-bold text-slate-900 text-sm">
@@ -639,3 +773,4 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     </div>
   );
 };
+

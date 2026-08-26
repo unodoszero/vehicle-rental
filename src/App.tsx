@@ -21,6 +21,53 @@ import {
 } from './utils/firebaseBookings';
 import { checkBookingConflicts } from './utils/dateUtils';
 
+type AppRoute = 'public' | 'admin' | 'tracker';
+
+const parseRouteFromLocation = (): { route: AppRoute; trackerId: string | null } => {
+  if (typeof window === 'undefined') {
+    return { route: 'public', trackerId: null };
+  }
+
+  const pathname = window.location.pathname.toLowerCase();
+  const searchParams = new URLSearchParams(window.location.search);
+  const hash = window.location.hash.toLowerCase();
+
+  // 1. Check for tracker route (/tracker, /tracker/ID, ?tracker=ID, ?id=ID, or #tracker=ID)
+  if (
+    pathname === '/tracker' || 
+    pathname.startsWith('/tracker/') || 
+    searchParams.has('tracker') || 
+    searchParams.get('page') === 'tracker' || 
+    hash.startsWith('#tracker')
+  ) {
+    let id: string | null = null;
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    if (pathParts[0]?.toLowerCase() === 'tracker' && pathParts[1]) {
+      id = decodeURIComponent(pathParts[1]);
+    } else if (searchParams.get('id')) {
+      id = searchParams.get('id');
+    } else if (searchParams.get('tracker')) {
+      id = searchParams.get('tracker');
+    } else if (hash.startsWith('#tracker=')) {
+      id = hash.replace('#tracker=', '');
+    }
+    return { route: 'tracker', trackerId: id };
+  }
+
+  // 2. Check for admin route (/admin, /admin/..., ?page=admin, #admin)
+  if (
+    pathname === '/admin' || 
+    pathname.startsWith('/admin/') || 
+    searchParams.get('page') === 'admin' || 
+    hash === '#admin'
+  ) {
+    return { route: 'admin', trackerId: null };
+  }
+
+  // 3. Landing page is Public Availability Calendar (/)
+  return { route: 'public', trackerId: null };
+};
+
 function MainApp() {
   const { showToast } = useToast();
 
@@ -50,13 +97,13 @@ function MainApp() {
   const [vehicleFilter, setVehicleFilter] = useState<'all' | VehicleType>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'upcoming' | 'overtime'>('all');
 
-  // Active public tracker route detection (from URL query ?tracker=ID or #tracker=ID)
-  const [activeTrackerId, setActiveTrackerId] = useState<string | null>(null);
-  const [isViewingPublicCalendar, setIsViewingPublicCalendar] = useState<boolean>(false);
+  // URL Route State
+  const [currentRoute, setCurrentRoute] = useState<AppRoute>(() => parseRouteFromLocation().route);
+  const [activeTrackerId, setActiveTrackerId] = useState<string | null>(() => parseRouteFromLocation().trackerId);
 
   // Real-time Firestore sync & offline cache subscription
   useEffect(() => {
-    const unsubscribe = subscribeToBookings((updatedBookings, isFromCache) => {
+    const unsubscribe = subscribeToBookings((updatedBookings) => {
       setBookings(updatedBookings);
     });
 
@@ -73,60 +120,49 @@ function MainApp() {
     };
   }, []);
 
-  // Check URL query on mount and on popstate
+  // Listen to browser forward/backward buttons (popstate)
   useEffect(() => {
-    const parseUrl = () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const trackerParam = urlParams.get('tracker');
-      const viewParam = urlParams.get('view');
-
-      if (trackerParam) {
-        setActiveTrackerId(trackerParam);
-        setIsViewingPublicCalendar(false);
-        return;
-      }
-      const hash = window.location.hash;
-      if (hash.startsWith('#tracker=')) {
-        setActiveTrackerId(hash.replace('#tracker=', ''));
-        setIsViewingPublicCalendar(false);
-        return;
-      }
-
-      if (viewParam === 'calendar' || viewParam === 'availability' || hash === '#calendar' || hash === '#availability') {
-        setIsViewingPublicCalendar(true);
-        setActiveTrackerId(null);
-        return;
-      }
-
-      setActiveTrackerId(null);
-      setIsViewingPublicCalendar(false);
+    const handlePopState = () => {
+      const { route, trackerId } = parseRouteFromLocation();
+      setCurrentRoute(route);
+      setActiveTrackerId(trackerId);
     };
 
-    parseUrl();
-    window.addEventListener('popstate', parseUrl);
-    return () => window.removeEventListener('popstate', parseUrl);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Handle open tracker public view
-  const handleOpenTracker = (bookingId: string) => {
-    setActiveTrackerId(bookingId);
-    setIsViewingPublicCalendar(false);
-    const newUrl = `${window.location.pathname}?tracker=${bookingId}`;
-    window.history.pushState({ tracker: bookingId }, '', newUrl);
+  // Router navigation helper
+  const navigateTo = useCallback((route: AppRoute, trackerId?: string | null) => {
+    let url = '/';
+    if (route === 'admin') {
+      url = '/admin';
+    } else if (route === 'tracker') {
+      url = trackerId ? `/tracker?id=${encodeURIComponent(trackerId)}` : '/tracker';
+    } else {
+      url = '/';
+    }
+
+    try {
+      window.history.pushState({ route, trackerId }, '', url);
+    } catch {
+      // Fallback for restricted preview environments
+    }
+
+    setCurrentRoute(route);
+    setActiveTrackerId(trackerId || null);
+  }, []);
+
+  const handleOpenTracker = (bookingId?: string) => {
+    navigateTo('tracker', bookingId || null);
   };
 
-  // Handle open public calendar view
+  const handleOpenAdmin = () => {
+    navigateTo('admin');
+  };
+
   const handleOpenPublicCalendar = () => {
-    setIsViewingPublicCalendar(true);
-    setActiveTrackerId(null);
-    const newUrl = `${window.location.pathname}?view=calendar`;
-    window.history.pushState({ view: 'calendar' }, '', newUrl);
-  };
-
-  const handleBackToAdmin = () => {
-    setActiveTrackerId(null);
-    setIsViewingPublicCalendar(false);
-    window.history.pushState({}, '', window.location.pathname);
+    navigateTo('public');
   };
 
   // Open Add Booking modal
@@ -226,49 +262,51 @@ function MainApp() {
     setIsDrawerOpen(true);
   };
 
-  // If in public Renter Live Tracker view:
-  if (activeTrackerId) {
-    const activeBooking = bookings.find((b) => b.id === activeTrackerId || b.trackingToken === activeTrackerId) || null;
+  // 1. ROUTE: /tracker - Live Renter Tracker View
+  if (currentRoute === 'tracker') {
+    const activeBooking = activeTrackerId 
+      ? (bookings.find((b) => b.id === activeTrackerId || b.trackingToken === activeTrackerId) || null)
+      : null;
+
     return (
       <RenterTrackerView
         booking={activeBooking}
         bookingId={activeTrackerId}
+        onNavigateHome={handleOpenPublicCalendar}
+        onNavigateAdmin={handleOpenAdmin}
+        onLookupId={(id) => handleOpenTracker(id)}
       />
     );
   }
 
-  // If in explicit Public Availability Calendar view (or opened via link)
-  if (isViewingPublicCalendar) {
+  // 2. ROUTE: / (Landing Page) - Public Availability Calendar
+  if (currentRoute === 'public') {
     return (
-      <div className="relative">
+      <div className="relative min-h-screen bg-slate-50 flex flex-col">
         {isAdminUnlocked && (
-          <div className="bg-blue-900 border-b border-blue-800 text-white text-xs px-4 py-2 flex items-center justify-between sticky top-0 z-40">
+          <div className="bg-blue-900 border-b border-blue-800 text-white text-xs px-4 py-2 flex items-center justify-between sticky top-0 z-40 shadow-xs">
             <span className="font-semibold flex items-center gap-1.5">
-              <span>👀 You are previewing the Public Availability Calendar (Potential Renters View)</span>
+              <span>Admin session active • Previewing Public Landing Page (/)</span>
             </span>
             <button
-              onClick={handleBackToAdmin}
-              className="px-3 py-1 bg-white text-blue-900 font-bold rounded hover:bg-blue-50 transition-colors text-xs"
+              onClick={handleOpenAdmin}
+              className="px-3 py-1 bg-white text-blue-900 font-bold rounded-md hover:bg-blue-50 transition-colors text-xs shadow-2xs"
             >
-              Back to Admin Dashboard
+              Open Admin System (/admin)
             </button>
           </div>
         )}
         <PublicAvailabilityCalendar
           bookings={bookings}
-          onOpenTrackerLookup={() => {
-            const id = prompt('Enter your Booking ID or Tracking Reference:') || '';
-            if (id.trim()) handleOpenTracker(id.trim());
-          }}
-          onOpenAdminLogin={() => {
-            setIsViewingPublicCalendar(false);
-          }}
+          onOpenTrackerLookup={() => handleOpenTracker()}
+          onOpenAdminLogin={handleOpenAdmin}
         />
       </div>
     );
   }
 
-  // Security Gate: Protect admin dashboard with PIN passkey
+  // 3. ROUTE: /admin - Admin Booking System
+  // Security Gate: Protect admin dashboard with PIN passkey if locked
   if (!isAdminUnlocked) {
     return (
       <AdminLockScreen
@@ -281,6 +319,8 @@ function MainApp() {
         onLookupTracker={(trackerKey) => {
           handleOpenTracker(trackerKey);
         }}
+        onNavigateHome={handleOpenPublicCalendar}
+        onNavigateTracker={() => handleOpenTracker()}
       />
     );
   }
@@ -344,6 +384,7 @@ function MainApp() {
         onSubmit={handleFormSubmit}
         editingBooking={editingBooking}
         initialDate={initialFormDate}
+        allBookings={bookings}
       />
 
       {/* Conflict Overlap Warning Modal */}

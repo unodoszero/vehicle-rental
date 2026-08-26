@@ -1,6 +1,6 @@
 {
   "name": "Miranda Rentals and Services",
-  "description": "Car and van rental operations scheduler with admin booking management, monthly multi-day calendar, conflict validation, and public renter live time tracker with overtime alerts.",
+  "description": "Welcome to Miranda Rentals and Services! Whether you need a self-drive car or a chauffeured van, we have you covered. Jump into our booking portal to reserve your dates and hit the road.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

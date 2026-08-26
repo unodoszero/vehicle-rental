@@ -265,7 +265,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </button>
             </div>
 
-            {/* Status Filter Dropdown */}
+            {/* Status Filter Dropdown (Clean, emoji-free) */}
             <select
               id="status-filter-select"
               value={statusFilter}
@@ -273,9 +273,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 shrink-0"
             >
               <option value="all">All Statuses</option>
-              <option value="overtime">⚠️ Overtime Alerts</option>
-              <option value="active">🟢 Active on Road</option>
-              <option value="upcoming">📅 Upcoming</option>
+              <option value="overtime">Overtime Alerts</option>
+              <option value="active">Active on Road</option>
+              <option value="upcoming">Upcoming</option>
             </select>
           </div>
         </div>
@@ -662,7 +662,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1">
                         <span className="flex items-center gap-1.5">
                           <CalendarIcon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{b.startDate} ({b.startTime}) &rarr; {b.noOfDays} Day{b.noOfDays > 1 ? 's' : ''}</span>
+                          <span>{formatDateOnly(b.startDate)} ({formatTimeOnly(b.startTime)}) &rarr; {b.noOfDays} Day{b.noOfDays > 1 ? 's' : ''}</span>
                         </span>
                         <span className="flex items-center gap-1.5">
                           <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />

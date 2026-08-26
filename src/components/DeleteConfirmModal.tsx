@@ -1,6 +1,7 @@
 import React from 'react';
 import { Trash2, AlertCircle, X } from 'lucide-react';
 import { Booking } from '../types';
+import { formatDateOnly, formatTimeOnly } from '../utils/dateUtils';
 
 interface DeleteConfirmModalProps {
   isOpen: boolean;
@@ -54,9 +55,9 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-1">
             <div className="font-semibold text-slate-900">{booking.name}</div>
             <div className="text-slate-600">
-              {booking.vehicle} • {booking.startDate} at {booking.startTime} ({booking.noOfDays} day{booking.noOfDays > 1 ? 's' : ''})
+              {booking.vehicle} • {formatDateOnly(booking.startDate)} at {formatTimeOnly(booking.startTime)} ({booking.noOfDays} day{booking.noOfDays > 1 ? 's' : ''})
             </div>
-            <div className="text-slate-400 font-mono text-[10px]">ID: {booking.id}</div>
+            <div className="text-slate-400 font-mono text-[10px]">Reference: {booking.trackingToken || booking.id}</div>
           </div>
         </div>
 

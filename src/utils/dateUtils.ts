@@ -1,4 +1,4 @@
-import { Booking, BookingTimeCalculation, DateConflict } from '../types';
+import { Booking, BookingTimeCalculation, DateConflict, VehicleType } from '../types';
 
 /**
  * Accurately parses a booking's date and time into a Date object
@@ -37,13 +37,14 @@ export function calculateBookingTime(
   const isActive = now >= startMs && now <= endMs;
   const isCompleted = false; // Admin can mark or if archived
 
-  const elapsedMs = Math.max(0, now - startMs);
-  const remainingMs = endMs - now; // Negative if overtime
+  const elapsedMs = isUpcoming ? 0 : Math.max(0, now - startMs);
+  // For upcoming bookings, remaining time counts down to start of departure (startMs - now).
+  // For active or overtime bookings, remaining time counts down to scheduled return (endMs - now).
+  const remainingMs = isUpcoming ? startMs - now : endMs - now;
 
-  const progressPercentage = Math.min(
-    100,
-    Math.max(0, (elapsedMs / totalDurationMs) * 100)
-  );
+  const progressPercentage = isUpcoming
+    ? 0
+    : Math.min(100, Math.max(0, (elapsedMs / totalDurationMs) * 100));
 
   // Time remaining or overtime calculation
   const absRemainingMs = Math.abs(remainingMs);
@@ -76,34 +77,101 @@ export function calculateBookingTime(
 }
 
 /**
- * Formats a Date object into human-readable date and time
+ * Formats a Date object or ISO string into "Month D, YYYY" (e.g. September 1, 2026)
  */
-export function formatDateTime(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }).format(date);
+export function formatFullDate(dateInput: Date | string | null | undefined): string {
+  if (!dateInput) return '';
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  if (typeof dateInput === 'string') {
+    const isoMatch = dateInput.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      const [, y, m, d] = isoMatch;
+      const mIndex = parseInt(m, 10) - 1;
+      const dayNum = parseInt(d, 10);
+      return `${monthNames[mIndex] || ''} ${dayNum}, ${y}`;
+    }
+    const parsed = new Date(dateInput);
+    if (!isNaN(parsed.getTime())) {
+      return `${monthNames[parsed.getMonth()]} ${parsed.getDate()}, ${parsed.getFullYear()}`;
+    }
+    return dateInput;
+  }
+  return `${monthNames[dateInput.getMonth()]} ${dateInput.getDate()}, ${dateInput.getFullYear()}`;
 }
 
-export function formatDateOnly(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(date);
+/**
+ * Formats a Date object or ISO string into MM/DD/YYYY format
+ */
+export function formatDateOnly(dateInput: Date | string | null | undefined): string {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string') {
+    // If already YYYY-MM-DD
+    const isoMatch = dateInput.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      const [, y, m, d] = isoMatch;
+      return `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+    }
+    const parsed = new Date(dateInput);
+    if (!isNaN(parsed.getTime())) {
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      const y = parsed.getFullYear();
+      return `${m}/${d}/${y}`;
+    }
+    return dateInput;
+  }
+  const m = String(dateInput.getMonth() + 1).padStart(2, '0');
+  const d = String(dateInput.getDate()).padStart(2, '0');
+  const y = dateInput.getFullYear();
+  return `${m}/${d}/${y}`;
 }
 
-export function formatTimeOnly(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }).format(date);
+/**
+ * Formats a Date object or HH:mm time string into 12-hour format (e.g. 5:00 PM, 11:30 AM)
+ */
+export function formatTimeOnly(timeInput: Date | string | null | undefined): string {
+  if (!timeInput) return '';
+  if (typeof timeInput === 'string') {
+    // If HH:mm string (e.g., '17:00' or '09:30')
+    const timeMatch = timeInput.match(/^(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      const h24 = parseInt(timeMatch[1], 10);
+      const minStr = timeMatch[2];
+      const period = h24 >= 12 ? 'PM' : 'AM';
+      const h12 = h24 % 12 || 12;
+      return `${h12}:${minStr} ${period}`;
+    }
+    const parsed = new Date(timeInput);
+    if (!isNaN(parsed.getTime())) {
+      let h = parsed.getHours();
+      const min = String(parsed.getMinutes()).padStart(2, '0');
+      const period = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${h}:${min} ${period}`;
+    }
+    return timeInput;
+  }
+  let h = timeInput.getHours();
+  const min = String(timeInput.getMinutes()).padStart(2, '0');
+  const period = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${min} ${period}`;
+}
+
+/**
+ * Formats a Date object or string into MM/DD/YYYY, 12-hour format
+ */
+export function formatDateTime(dateInput: Date | string | null | undefined): string {
+  if (!dateInput) return '';
+  const d = formatDateOnly(dateInput);
+  const t = formatTimeOnly(dateInput);
+  if (!d && !t) return '';
+  if (!d) return t;
+  if (!t) return d;
+  return `${d} at ${t}`;
 }
 
 /**
@@ -258,3 +326,110 @@ export function getBookingDayPosition(booking: Booking, dateString: string) {
     isSingleDay,
   };
 }
+
+/**
+ * Checks if a specific day (YYYY-MM-DD) is booked/unavailable based on vehicle filter
+ */
+export function isDayBookedForFilter(
+  dateString: string,
+  bookings: Booking[],
+  vehicleFilter: 'all' | VehicleType,
+  excludeBookingId?: string
+): { isBooked: boolean; carBooked: boolean; vanBooked: boolean; isClickable: boolean } {
+  const activeBookings = bookings.filter((b) => !excludeBookingId || b.id !== excludeBookingId);
+
+  const carBookings = activeBookings.filter((b) => {
+    if (b.vehicle !== 'Car') return false;
+    return isBookingOnDay(b, dateString);
+  });
+
+  const vanBookings = activeBookings.filter((b) => {
+    if (b.vehicle !== 'Van') return false;
+    return isBookingOnDay(b, dateString);
+  });
+
+  const carBooked = carBookings.length > 0;
+  const vanBooked = vanBookings.length > 0;
+
+  let isClickable = true;
+  if (vehicleFilter === 'Car') {
+    isClickable = !carBooked;
+  } else if (vehicleFilter === 'Van') {
+    isClickable = !vanBooked;
+  } else {
+    // 'all': Clickable if at least one vehicle category is available
+    isClickable = !carBooked || !vanBooked;
+  }
+
+  return {
+    isBooked: carBooked || vanBooked,
+    carBooked,
+    vanBooked,
+    isClickable,
+  };
+}
+
+/**
+ * Validates that every day between startDateStr and endDateStr is consecutive and available
+ * Returns false if ANY day in between is booked or unavailable.
+ */
+export function isDateRangeConsecutivelyAvailable(
+  startDateStr: string,
+  endDateStr: string,
+  bookings: Booking[],
+  vehicleFilter: 'all' | VehicleType,
+  excludeBookingId?: string
+): { isConsecutiveAvailable: boolean; blockedDate?: string } {
+  if (!startDateStr || !endDateStr) {
+    return { isConsecutiveAvailable: false };
+  }
+
+  const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
+  const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
+
+  const start = new Date(startYear, startMonth - 1, startDay);
+  const end = new Date(endYear, endMonth - 1, endDay);
+
+  if (start.getTime() > end.getTime()) {
+    return { isConsecutiveAvailable: false };
+  }
+
+  const current = new Date(start.getTime());
+  while (current.getTime() <= end.getTime()) {
+    const dStr = toISODateString(current);
+    const dayAvail = isDayBookedForFilter(dStr, bookings, vehicleFilter, excludeBookingId);
+    if (!dayAvail.isClickable) {
+      return { isConsecutiveAvailable: false, blockedDate: dStr };
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  return { isConsecutiveAvailable: true };
+}
+
+/**
+ * Finds the earliest blocked/booked date strictly after startDateStr
+ */
+export function getFirstBlockedDateAfter(
+  startDateStr: string,
+  bookings: Booking[],
+  vehicleFilter: 'all' | VehicleType,
+  excludeBookingId?: string
+): string | null {
+  const [year, month, day] = startDateStr.split('-').map(Number);
+  const current = new Date(year, month - 1, day);
+  current.setDate(current.getDate() + 1); // strictly after start date
+
+  // Check up to 180 days ahead
+  for (let i = 0; i < 180; i++) {
+    const dStr = toISODateString(current);
+    const dayAvail = isDayBookedForFilter(dStr, bookings, vehicleFilter, excludeBookingId);
+    if (!dayAvail.isClickable) {
+      return dStr;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  return null;
+}
+
