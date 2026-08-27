@@ -45,23 +45,46 @@ export function generateTrackingToken(): string {
 /**
  * Admin Security & PIN Management
  */
+const pinVerificationCache = new Map<string, { valid: boolean; timestamp: number }>();
+const CACHE_TTL_MS = 60000; // 1 minute in-memory cache
+
 export async function verifyAdminPinAsync(enteredPin: string): Promise<boolean> {
+  const trimmed = enteredPin.trim();
+  if (!trimmed) return false;
+
+  // 1. Check in-memory cache first (0 network / db hits)
+  const cached = pinVerificationCache.get(trimmed);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.valid;
+  }
+
+  // 2. Fast local check if matches stored PIN
+  const localPin = getAdminPin().trim();
+  if (trimmed === localPin) {
+    pinVerificationCache.set(trimmed, { valid: true, timestamp: Date.now() });
+    return true;
+  }
+
   try {
     const res = await fetch('/api/admin/verify-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: enteredPin.trim() }),
+      body: JSON.stringify({ pin: trimmed }),
     });
     if (res.ok) {
       const data = await res.json();
-      return !!data.success;
+      const isValid = !!data.success;
+      pinVerificationCache.set(trimmed, { valid: isValid, timestamp: Date.now() });
+      return isValid;
     }
+    pinVerificationCache.set(trimmed, { valid: false, timestamp: Date.now() });
     return false;
   } catch (err) {
     console.warn('Server PIN verification failed or offline, falling back to local verification:', err);
     // Offline fallback to local check
-    const currentPin = getAdminPin();
-    return enteredPin.trim() === currentPin.trim();
+    const isValid = trimmed === localPin;
+    pinVerificationCache.set(trimmed, { valid: isValid, timestamp: Date.now() });
+    return isValid;
   }
 }
 

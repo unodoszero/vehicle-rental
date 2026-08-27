@@ -2,10 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Copy, Check, ExternalLink, Calendar, Clock, MapPin, 
   Phone, User, Users, Car, ShieldCheck, AlertTriangle, 
-  Edit, Trash2, ArrowRight, Sparkles, Navigation, MessageSquare
+  Edit, Trash2, ArrowRight, Sparkles, Navigation, MessageSquare, RotateCcw
 } from 'lucide-react';
 import { Booking } from '../types';
-import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly } from '../utils/dateUtils';
+import { 
+  calculateBookingTime, 
+  formatDateTime, 
+  formatDateOnly, 
+  formatTimeOnly, 
+  getBookingTurnaroundReadyDateTime 
+} from '../utils/dateUtils';
 import { useToast } from './Toast';
 
 interface BookingDetailsDrawerProps {
@@ -16,6 +22,30 @@ interface BookingDetailsDrawerProps {
   onDelete: (booking: Booking) => void;
   onOpenTracker: (bookingId: string) => void;
 }
+
+export const generateBookingConfirmationMessage = (booking: Booking): string => {
+  const trackerKey = booking.trackingToken || booking.id;
+  const trackerUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/tracker?id=${encodeURIComponent(trackerKey)}`;
+  const calc = calculateBookingTime(booking, new Date());
+  const vehicleDesc = `${booking.vehicle}${booking.vehicleModel ? ` (${booking.vehicleModel})` : ''}${booking.plateNumber ? ` [Plate: ${booking.plateNumber}]` : ''}`;
+  
+  return `Hi ${booking.name}!
+
+Thank you for choosing Miranda Rentals and Services. Your reservation for the ${vehicleDesc} has been confirmed.
+
+Rental Schedule:
+• Pickup / Start: ${formatDateOnly(booking.startDate)} at ${formatTimeOnly(booking.startTime)}
+• Expected Return: ${formatDateOnly(calc.endDateTime)} at ${formatTimeOnly(calc.endDateTime)} (${booking.noOfDays} Day${booking.noOfDays > 1 ? 's' : ''})
+• Service Type: ${booking.selfDrive ? 'Self-Drive' : 'With Driver'}
+• Reference No.: ${booking.id}
+
+The ${booking.vehicle.toLowerCase()} has been thoroughly cleaned, sanitized, and inspected for your journey.
+
+For full booking details, return instructions, and live status tracking, please open your secure link:
+${trackerUrl}
+
+Have a safe and pleasant trip! Please feel free to message us if you need any assistance.`;
+};
 
 export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
   booking,
@@ -43,31 +73,16 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
   // Generate and set friendly professional customer message when booking opens/changes
   useEffect(() => {
     if (booking) {
-      const trackerKey = booking.trackingToken || booking.id;
-      const trackerUrl = `${window.location.origin}/tracker?id=${encodeURIComponent(trackerKey)}`;
-      const calc = calculateBookingTime(booking, new Date());
-      const vehicleDesc = `${booking.vehicle}${booking.vehicleModel ? ` (${booking.vehicleModel})` : ''}${booking.plateNumber ? ` [Plate: ${booking.plateNumber}]` : ''}`;
-      
-      const message = `Hi ${booking.name}!
-
-Thank you for choosing Miranda Rentals and Services. Your reservation for the ${vehicleDesc} has been confirmed.
-
-Rental Schedule:
-• Pickup / Start: ${formatDateOnly(booking.startDate)} at ${formatTimeOnly(booking.startTime)}
-• Expected Return: ${formatDateOnly(calc.endDateTime)} at ${formatTimeOnly(calc.endDateTime)} (${booking.noOfDays} Day${booking.noOfDays > 1 ? 's' : ''})
-• Service Type: ${booking.selfDrive ? 'Self-Drive' : 'With Driver'}
-• Reference No.: ${booking.id}
-
-The ${booking.vehicle.toLowerCase()} has been thoroughly cleaned, sanitized, and inspected for your journey.
-
-For full booking details, return instructions, and live status tracking, please open your secure link:
-${trackerUrl}
-
-Have a safe and pleasant trip! Please feel free to message us if you need any assistance.`;
-
-      setCustomMessage(message);
+      setCustomMessage(generateBookingConfirmationMessage(booking));
     }
   }, [booking, isOpen]);
+
+  const handleResetMessage = () => {
+    if (!booking) return;
+    const initial = generateBookingConfirmationMessage(booking);
+    setCustomMessage(initial);
+    showToast('Message Restored', 'Customer confirmation message has been reset to initial template.', 'info');
+  };
 
   if (!isOpen || !booking) return null;
 
@@ -270,15 +285,20 @@ Have a safe and pleasant trip! Please feel free to message us if you need any as
             <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
               <span className="text-slate-500">Schedule:</span>
               <span className="font-semibold text-slate-900">
-                {formatDateOnly(booking.startDate)} ({formatTimeOnly(booking.startTime)}) • {booking.noOfDays} Day{booking.noOfDays > 1 ? 's' : ''}
+                {formatDateOnly(booking.startDate)} ({formatTimeOnly(booking.startTime)}) • {booking.noOfDays} Day{booking.noOfDays > 1 ? 's' : ''} ({(booking.noOfDays * 24) - 2}h)
               </span>
             </div>
 
             <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
-              <span className="text-slate-500">End Date / Return:</span>
-              <span className="font-bold text-slate-900">
-                {formatDateOnly(timeCalc.endDateTime)}, {formatTimeOnly(timeCalc.endDateTime)}
-              </span>
+              <span className="text-slate-500">Scheduled Return:</span>
+              <div className="text-right">
+                <span className="font-bold text-slate-900 block">
+                  {formatDateOnly(timeCalc.endDateTime)}, {formatTimeOnly(timeCalc.endDateTime)}
+                </span>
+                <span className="text-[10px] text-emerald-700 block font-mono">
+                  Ready for next: {formatTimeOnly(getBookingTurnaroundReadyDateTime(booking))} (4h window)
+                </span>
+              </div>
             </div>
 
             <div className="flex justify-between items-center text-xs py-1">
@@ -344,9 +364,21 @@ Have a safe and pleasant trip! Please feel free to message us if you need any as
                 placeholder="Customer confirmation message..."
               />
               <div className="flex items-center justify-between px-3 py-2 bg-slate-100/90 border-t border-slate-200">
-                <span className="text-[10px] text-slate-500 italic">
-                  Editable before copying
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    id="refresh-customer-message-btn"
+                    type="button"
+                    onClick={handleResetMessage}
+                    title="Restore initial confirmation message template"
+                    className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-white rounded-md border border-slate-200/60 hover:border-slate-300 transition-all cursor-pointer flex items-center gap-1.5 text-[11px] font-medium active:scale-95 shadow-2xs"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Initial</span>
+                  </button>
+                  <span className="text-[10px] text-slate-400 italic hidden sm:inline">
+                    Editable
+                  </span>
+                </div>
                 <button
                   id="copy-customer-message-btn"
                   type="button"

@@ -1,6 +1,15 @@
 import { Booking, BookingTimeCalculation, DateConflict, VehicleType } from '../types';
 
 /**
+ * Standard policy rules:
+ * - 2 hours deducted from standard 24h day cycles (e.g. 1 day = 22h, 2 days = 46h)
+ *   to ensure a vehicle turnaround, cleaning, and maintenance buffer before next reservation.
+ * - 4 hours turnaround window after return before vehicle is ready for next customer.
+ */
+export const RENTAL_DEDUCTION_HOURS = 2;
+export const TURNOVER_CLEANING_HOURS = 4;
+
+/**
  * Accurately parses a booking's date and time into a Date object
  */
 export function getBookingStartDateTime(booking: Pick<Booking, 'startDate' | 'startTime'>): Date {
@@ -10,12 +19,24 @@ export function getBookingStartDateTime(booking: Pick<Booking, 'startDate' | 'st
 }
 
 /**
- * Computes the scheduled end Date by adding exact milliseconds (days * 24h)
+ * Computes the scheduled end Date by deducting 2 hours from full 24-hour cycles:
+ * ((noOfDays * 24) - 2) hours.
+ * E.g., 1 Day = 22 hours, 2 Days = 46 hours.
  */
 export function getBookingEndDateTime(booking: Pick<Booking, 'startDate' | 'startTime' | 'noOfDays'>): Date {
   const start = getBookingStartDateTime(booking);
-  const durationMs = booking.noOfDays * 24 * 60 * 60 * 1000;
+  const durationHours = Math.max(1, (booking.noOfDays * 24) - RENTAL_DEDUCTION_HOURS);
+  const durationMs = durationHours * 60 * 60 * 1000;
   return new Date(start.getTime() + durationMs);
+}
+
+/**
+ * Computes the turnaround/cleaning ready Date (4 hours after scheduled return).
+ * The vehicle is ready for the next customer starting from this timestamp.
+ */
+export function getBookingTurnaroundReadyDateTime(booking: Pick<Booking, 'startDate' | 'startTime' | 'noOfDays'>): Date {
+  const end = getBookingEndDateTime(booking);
+  return new Date(end.getTime() + (TURNOVER_CLEANING_HOURS * 60 * 60 * 1000));
 }
 
 /**
@@ -327,6 +348,157 @@ export function getBookingDayPosition(booking: Booking, dateString: string) {
   };
 }
 
+export interface DayAvailabilityInfo {
+  isBooked: boolean;
+  carBooked: boolean;
+  vanBooked: boolean;
+  isClickable: boolean;
+  canStartBooking: boolean;
+  canEndBooking: boolean;
+  isReturnDay: boolean; // Arrival day (booking ends)
+  isCarReturnDay: boolean;
+  isVanReturnDay: boolean;
+  isStartDay: boolean; // Departure day (booking starts)
+  isCarStartDay: boolean;
+  isVanStartDay: boolean;
+  isBackToBack: boolean; // Both arrival and departure on same date
+  readyTime?: string; // Pickup ready after arrival + 4h turnover
+  carReadyTime?: string;
+  vanReadyTime?: string;
+  returnTime?: string; // Scheduled vehicle return time
+  carReturnTime?: string;
+  vanReturnTime?: string;
+  departureTime?: string; // Scheduled next departure time
+  carDepartureTime?: string;
+  vanDepartureTime?: string;
+  latestReturnTime?: string; // Required return time (departure - 4h turnover)
+  carLatestReturnTime?: string;
+  vanLatestReturnTime?: string;
+}
+
+function evaluateVehicleDayAvailability(vehicleBookings: Booking[], dateString: string) {
+  const touching = vehicleBookings.filter((b) => isBookingOnDay(b, dateString));
+  if (touching.length === 0) {
+    return {
+      isBooked: false,
+      isClickable: true,
+      canStartBooking: true,
+      canEndBooking: true,
+      isReturnDay: false,
+      isStartDay: false,
+      isBackToBack: false,
+      returnTime: undefined,
+      readyTime: undefined,
+      departureTime: undefined,
+      latestReturnTime: undefined,
+    };
+  }
+
+  // Categorize touching bookings
+  const startingBookings = touching.filter((b) => b.startDate === dateString);
+  const endingBookings = touching.filter((b) => {
+    const endStr = toISODateString(getBookingEndDateTime(b));
+    return endStr === dateString;
+  });
+  const middleBookings = touching.filter((b) => {
+    const endStr = toISODateString(getBookingEndDateTime(b));
+    return dateString > b.startDate && dateString < endStr;
+  });
+
+  // If any booking is in the middle of a trip: completely booked
+  if (middleBookings.length > 0) {
+    return {
+      isBooked: true,
+      isClickable: false,
+      canStartBooking: false,
+      canEndBooking: false,
+      isReturnDay: false,
+      isStartDay: false,
+      isBackToBack: false,
+      returnTime: undefined,
+      readyTime: undefined,
+      departureTime: undefined,
+      latestReturnTime: undefined,
+    };
+  }
+
+  // Case: Both Arrival (ending) and Departure (starting) on the same day (Back-to-Back)
+  if (startingBookings.length > 0 && endingBookings.length > 0) {
+    const latestEndDt = new Date(Math.max(...endingBookings.map((b) => getBookingEndDateTime(b).getTime())));
+    const latestReadyDt = new Date(Math.max(...endingBookings.map((b) => getBookingTurnaroundReadyDateTime(b).getTime())));
+    const earliestStartDt = new Date(Math.min(...startingBookings.map((b) => getBookingStartDateTime(b).getTime())));
+    const latestReturnDt = new Date(earliestStartDt.getTime() - (TURNOVER_CLEANING_HOURS * 60 * 60 * 1000));
+
+    return {
+      isBooked: true,
+      isClickable: false, // Rule 4: Not selectable for a 3rd customer
+      canStartBooking: false,
+      canEndBooking: false,
+      isReturnDay: true,
+      isStartDay: true,
+      isBackToBack: true,
+      returnTime: formatTimeOnly(latestEndDt),
+      readyTime: formatTimeOnly(latestReadyDt),
+      departureTime: formatTimeOnly(earliestStartDt),
+      latestReturnTime: formatTimeOnly(latestReturnDt),
+    };
+  }
+
+  // Case: Only Starting Booking(s) on this day (Departure Day)
+  if (startingBookings.length > 0) {
+    const earliestStartDt = new Date(Math.min(...startingBookings.map((b) => getBookingStartDateTime(b).getTime())));
+    const latestReturnDt = new Date(earliestStartDt.getTime() - (TURNOVER_CLEANING_HOURS * 60 * 60 * 1000));
+
+    return {
+      isBooked: true,
+      isClickable: true, // Clickable as end/return date
+      canStartBooking: false, // Cannot start pickup on a departure day
+      canEndBooking: true, // Can end/return before departure
+      isReturnDay: false,
+      isStartDay: true,
+      isBackToBack: false,
+      returnTime: undefined,
+      readyTime: undefined,
+      departureTime: formatTimeOnly(earliestStartDt),
+      latestReturnTime: formatTimeOnly(latestReturnDt),
+    };
+  }
+
+  // Case: Only Ending Booking(s) on this day (Arrival Day / Return Day)
+  if (endingBookings.length > 0) {
+    const latestEndDt = new Date(Math.max(...endingBookings.map((b) => getBookingEndDateTime(b).getTime())));
+    const latestReadyDt = new Date(Math.max(...endingBookings.map((b) => getBookingTurnaroundReadyDateTime(b).getTime())));
+
+    return {
+      isBooked: true,
+      isClickable: true, // Clickable as start/pickup date
+      canStartBooking: true, // Can start pickup from readyTime
+      canEndBooking: false, // Cannot end/return during existing trip
+      isReturnDay: true,
+      isStartDay: false,
+      isBackToBack: false,
+      returnTime: formatTimeOnly(latestEndDt),
+      readyTime: formatTimeOnly(latestReadyDt),
+      departureTime: undefined,
+      latestReturnTime: undefined,
+    };
+  }
+
+  return {
+    isBooked: true,
+    isClickable: false,
+    canStartBooking: false,
+    canEndBooking: false,
+    isReturnDay: false,
+    isStartDay: false,
+    isBackToBack: false,
+    returnTime: undefined,
+    readyTime: undefined,
+    departureTime: undefined,
+    latestReturnTime: undefined,
+  };
+}
+
 /**
  * Checks if a specific day (YYYY-MM-DD) is booked/unavailable based on vehicle filter
  */
@@ -335,43 +507,94 @@ export function isDayBookedForFilter(
   bookings: Booking[],
   vehicleFilter: 'all' | VehicleType,
   excludeBookingId?: string
-): { isBooked: boolean; carBooked: boolean; vanBooked: boolean; isClickable: boolean } {
+): DayAvailabilityInfo {
   const activeBookings = bookings.filter((b) => !excludeBookingId || b.id !== excludeBookingId);
 
-  const carBookings = activeBookings.filter((b) => {
-    if (b.vehicle !== 'Car') return false;
-    return isBookingOnDay(b, dateString);
-  });
+  const carBookings = activeBookings.filter((b) => b.vehicle === 'Car');
+  const vanBookings = activeBookings.filter((b) => b.vehicle === 'Van');
 
-  const vanBookings = activeBookings.filter((b) => {
-    if (b.vehicle !== 'Van') return false;
-    return isBookingOnDay(b, dateString);
-  });
-
-  const carBooked = carBookings.length > 0;
-  const vanBooked = vanBookings.length > 0;
+  const carStatus = evaluateVehicleDayAvailability(carBookings, dateString);
+  const vanStatus = evaluateVehicleDayAvailability(vanBookings, dateString);
 
   let isClickable = true;
+  let canStartBooking = true;
+  let canEndBooking = true;
+  let isReturnDay = false;
+  let isStartDay = false;
+  let isBackToBack = false;
+  let readyTime: string | undefined;
+  let returnTime: string | undefined;
+  let departureTime: string | undefined;
+  let latestReturnTime: string | undefined;
+
   if (vehicleFilter === 'Car') {
-    isClickable = !carBooked;
+    isClickable = carStatus.isClickable;
+    canStartBooking = carStatus.canStartBooking;
+    canEndBooking = carStatus.canEndBooking;
+    isReturnDay = carStatus.isReturnDay;
+    isStartDay = carStatus.isStartDay;
+    isBackToBack = carStatus.isBackToBack;
+    readyTime = carStatus.readyTime;
+    returnTime = carStatus.returnTime;
+    departureTime = carStatus.departureTime;
+    latestReturnTime = carStatus.latestReturnTime;
   } else if (vehicleFilter === 'Van') {
-    isClickable = !vanBooked;
+    isClickable = vanStatus.isClickable;
+    canStartBooking = vanStatus.canStartBooking;
+    canEndBooking = vanStatus.canEndBooking;
+    isReturnDay = vanStatus.isReturnDay;
+    isStartDay = vanStatus.isStartDay;
+    isBackToBack = vanStatus.isBackToBack;
+    readyTime = vanStatus.readyTime;
+    returnTime = vanStatus.returnTime;
+    departureTime = vanStatus.departureTime;
+    latestReturnTime = vanStatus.latestReturnTime;
   } else {
-    // 'all': Clickable if at least one vehicle category is available
-    isClickable = !carBooked || !vanBooked;
+    // 'all' filter
+    isClickable = carStatus.isClickable || vanStatus.isClickable;
+    canStartBooking = carStatus.canStartBooking || vanStatus.canStartBooking;
+    canEndBooking = carStatus.canEndBooking || vanStatus.canEndBooking;
+    isReturnDay = carStatus.isReturnDay || vanStatus.isReturnDay;
+    isStartDay = carStatus.isStartDay || vanStatus.isStartDay;
+    isBackToBack = carStatus.isBackToBack || vanStatus.isBackToBack;
+    readyTime = carStatus.isReturnDay ? carStatus.readyTime : vanStatus.readyTime;
+    returnTime = carStatus.isReturnDay ? carStatus.returnTime : vanStatus.returnTime;
+    departureTime = carStatus.isStartDay ? carStatus.departureTime : vanStatus.departureTime;
+    latestReturnTime = carStatus.isStartDay ? carStatus.latestReturnTime : vanStatus.latestReturnTime;
   }
 
   return {
-    isBooked: carBooked || vanBooked,
-    carBooked,
-    vanBooked,
+    isBooked: carStatus.isBooked || vanStatus.isBooked,
+    carBooked: carStatus.isBooked,
+    vanBooked: vanStatus.isBooked,
     isClickable,
+    canStartBooking,
+    canEndBooking,
+    isReturnDay,
+    isCarReturnDay: carStatus.isReturnDay,
+    isVanReturnDay: vanStatus.isReturnDay,
+    isStartDay,
+    isCarStartDay: carStatus.isStartDay,
+    isVanStartDay: vanStatus.isStartDay,
+    isBackToBack,
+    readyTime,
+    returnTime,
+    departureTime,
+    latestReturnTime,
+    carReadyTime: carStatus.readyTime,
+    vanReadyTime: vanStatus.readyTime,
+    carReturnTime: carStatus.returnTime,
+    vanReturnTime: vanStatus.returnTime,
+    carDepartureTime: carStatus.departureTime,
+    vanDepartureTime: vanStatus.departureTime,
+    carLatestReturnTime: carStatus.latestReturnTime,
+    vanLatestReturnTime: vanStatus.latestReturnTime,
   };
 }
 
 /**
  * Validates that every day between startDateStr and endDateStr is consecutive and available
- * Returns false if ANY day in between is booked or unavailable.
+ * Supports starting on Arrival Days and ending on Departure Days.
  */
 export function isDateRangeConsecutivelyAvailable(
   startDateStr: string,
@@ -379,7 +602,7 @@ export function isDateRangeConsecutivelyAvailable(
   bookings: Booking[],
   vehicleFilter: 'all' | VehicleType,
   excludeBookingId?: string
-): { isConsecutiveAvailable: boolean; blockedDate?: string } {
+): { isConsecutiveAvailable: boolean; blockedDate?: string; reason?: string } {
   if (!startDateStr || !endDateStr) {
     return { isConsecutiveAvailable: false };
   }
@@ -394,12 +617,43 @@ export function isDateRangeConsecutivelyAvailable(
     return { isConsecutiveAvailable: false };
   }
 
+  // Check start date validity
+  const startDayAvail = isDayBookedForFilter(startDateStr, bookings, vehicleFilter, excludeBookingId);
+  if (!startDayAvail.canStartBooking) {
+    return {
+      isConsecutiveAvailable: false,
+      blockedDate: startDateStr,
+      reason: startDayAvail.isStartDay
+        ? `${formatFullDate(startDateStr)} is an outgoing pick-up date. You cannot start a rental on this day.`
+        : `${formatFullDate(startDateStr)} is not available for rental start.`
+    };
+  }
+
+  // Check end date validity
+  const endDayAvail = isDayBookedForFilter(endDateStr, bookings, vehicleFilter, excludeBookingId);
+  if (startDateStr !== endDateStr && !endDayAvail.canEndBooking) {
+    return {
+      isConsecutiveAvailable: false,
+      blockedDate: endDateStr,
+      reason: endDayAvail.isReturnDay
+        ? `${formatFullDate(endDateStr)} is a drop-off date for an ongoing rental.`
+        : `${formatFullDate(endDateStr)} is already reserved.`
+    };
+  }
+
+  // Check intermediate days strictly between start and end (cannot be booked or turnover days)
   const current = new Date(start.getTime());
-  while (current.getTime() <= end.getTime()) {
+  current.setDate(current.getDate() + 1);
+
+  while (current.getTime() < end.getTime()) {
     const dStr = toISODateString(current);
     const dayAvail = isDayBookedForFilter(dStr, bookings, vehicleFilter, excludeBookingId);
-    if (!dayAvail.isClickable) {
-      return { isConsecutiveAvailable: false, blockedDate: dStr };
+    if (dayAvail.isBooked) {
+      return {
+        isConsecutiveAvailable: false,
+        blockedDate: dStr,
+        reason: `${formatFullDate(dStr)} is already reserved.`
+      };
     }
     current.setDate(current.getDate() + 1);
   }
@@ -424,9 +678,19 @@ export function getFirstBlockedDateAfter(
   for (let i = 0; i < 180; i++) {
     const dStr = toISODateString(current);
     const dayAvail = isDayBookedForFilter(dStr, bookings, vehicleFilter, excludeBookingId);
-    if (!dayAvail.isClickable) {
+
+    // If day is a Departure Day: this day CAN be reached as end date, but date after it is blocked!
+    if (dayAvail.isStartDay && dayAvail.canEndBooking) {
+      const nextDay = new Date(current.getTime());
+      nextDay.setDate(nextDay.getDate() + 1);
+      return toISODateString(nextDay);
+    }
+
+    // If day cannot be ended on (middle day, return day, back-to-back, etc.)
+    if (!dayAvail.canEndBooking) {
       return dStr;
     }
+
     current.setDate(current.getDate() + 1);
   }
 

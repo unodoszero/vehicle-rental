@@ -5,7 +5,8 @@ import {
   FileText, Fuel, CreditCard, ShieldCheck,
   Search, Share2, AlertTriangle, XCircle,
   FileCheck, UserCheck, ShieldAlert, Download,
-  Radio, AlertOctagon, ExternalLink
+  Radio, AlertOctagon, ExternalLink, HelpCircle,
+  ChevronDown, Clock
 } from 'lucide-react';
 import { Booking, VehicleType } from '../types';
 
@@ -35,7 +36,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 }) => {
   // Navigation & Date State
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
-  const [vehicleFilter, setVehicleFilter] = useState<'all' | VehicleType>('all');
+  const [vehicleFilter, setVehicleFilter] = useState<VehicleType>('Car');
   
   // Date Selection for Renters
   const [selectedStartDate, setSelectedStartDate] = useState<string | null>(null);
@@ -44,6 +45,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
   const [copiedInquiry, setCopiedInquiry] = useState(false);
   const [copiedShareLink, setCopiedShareLink] = useState(false);
   const [rangeWarning, setRangeWarning] = useState<string | null>(null);
+  const [showDepositDetails, setShowDepositDetails] = useState(false);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -71,7 +73,6 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
   // Filter bookings based on vehicle category
   const filteredBookings = useMemo(() => {
-    if (vehicleFilter === 'all') return bookings;
     return bookings.filter((b) => b.vehicle === vehicleFilter);
   }, [bookings, vehicleFilter]);
 
@@ -80,26 +81,54 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     return isDayBookedForFilter(dateString, filteredBookings, vehicleFilter);
   };
 
-  // Date click logic - Enforces strictly consecutive available days
+  // Date click logic - Enforces strictly consecutive available days, allowing Return/Arrival Days as start dates and Departure Days as end dates
   const handleDayClick = (dateString: string, isPast: boolean, isClickable: boolean) => {
     if (isPast || !isClickable) return;
     setRangeWarning(null);
 
-    // Case 1: First click or resetting after full range
+    const clickedDayStatus = getDayAvailability(dateString);
+
+    // Case 1: First click or resetting after full range (Selecting Start/Pickup Date)
     if (!selectedStartDate || (selectedStartDate && selectedEndDate)) {
+      if (!clickedDayStatus.canStartBooking) {
+        if (clickedDayStatus.isStartDay) {
+          setRangeWarning(
+            `${formatFullDate(dateString)} is an outgoing pick-up date (Pick-up at ${clickedDayStatus.departureTime || 'scheduled time'}). It can only be selected as a return/end date for an earlier rental.`
+          );
+        } else {
+          setRangeWarning(`${formatFullDate(dateString)} is not available for rental pickup.`);
+        }
+        return;
+      }
       setSelectedStartDate(dateString);
       setSelectedEndDate(null);
       return;
     }
 
-    // Case 2: User clicked an earlier date or same date -> Reset start date
-    if (dateString <= selectedStartDate) {
+    // Case 2: User clicked an earlier date than current start -> Reset start date
+    if (dateString < selectedStartDate) {
+      if (!clickedDayStatus.canStartBooking) {
+        if (clickedDayStatus.isStartDay) {
+          setRangeWarning(
+            `${formatFullDate(dateString)} is an outgoing pick-up date. It can only be selected as a drop-off date for an earlier rental.`
+          );
+        } else {
+          setRangeWarning(`${formatFullDate(dateString)} is not available for rental pickup.`);
+        }
+        return;
+      }
       setSelectedStartDate(dateString);
       setSelectedEndDate(null);
       return;
     }
 
-    // Case 3: User clicked a later date as End Date -> Validate that every single day in between is available
+    // Case 3: User clicked same date again
+    if (dateString === selectedStartDate) {
+      setSelectedEndDate(dateString);
+      return;
+    }
+
+    // Case 4: User clicked a later date as End Date -> Validate that every single day in between is available
     const rangeCheck = isDateRangeConsecutivelyAvailable(
       selectedStartDate,
       dateString,
@@ -109,13 +138,16 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
     if (!rangeCheck.isConsecutiveAvailable) {
       // Range contains one or more booked days
-      const blockedDateFormatted = rangeCheck.blockedDate ? formatDateOnly(rangeCheck.blockedDate) : 'intermediate dates';
+      const blockedDateFormatted = rangeCheck.blockedDate ? formatFullDate(rangeCheck.blockedDate) : 'intermediate dates';
       setRangeWarning(
+        rangeCheck.reason ||
         `Cannot select across booked dates (${blockedDateFormatted} is already reserved). You can only select consecutive available days.`
       );
-      // Reset start to newly clicked date
-      setSelectedStartDate(dateString);
-      setSelectedEndDate(null);
+      // If the clicked date can be a start date, reset to it, otherwise clear end selection
+      if (clickedDayStatus.canStartBooking) {
+        setSelectedStartDate(dateString);
+        setSelectedEndDate(null);
+      }
     } else {
       setSelectedEndDate(dateString);
     }
@@ -150,16 +182,28 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
     return Math.max(1, diff + 1);
   }, [selectedStartDate, selectedEndDate]);
 
-  // Generate Inquiry Message with full Month D, YYYY format
+  // Generate Inquiry Message with full Month D, YYYY format and turnover timing notes
   const inquiryMessage = useMemo(() => {
-    const vehicleText = vehicleFilter === 'all' ? 'Car' : vehicleFilter;
+    const vehicleText = vehicleFilter;
+    const startDayInfo = selectedStartDate ? getDayAvailability(selectedStartDate) : null;
+    const endDayInfo = selectedEndDate ? getDayAvailability(selectedEndDate) : null;
+
+    let timingNotes = '';
+    if (startDayInfo?.isReturnDay && startDayInfo.readyTime && endDayInfo?.isStartDay && endDayInfo.latestReturnTime) {
+      timingNotes = ` (Pickup after ${startDayInfo.readyTime} cleaning turnover, return by ${endDayInfo.latestReturnTime} turnover before next pick-up)`;
+    } else if (startDayInfo?.isReturnDay && startDayInfo.readyTime) {
+      timingNotes = ` (Available pickup after ${startDayInfo.readyTime} cleaning turnover)`;
+    } else if (endDayInfo?.isStartDay && endDayInfo.latestReturnTime) {
+      timingNotes = ` (Return by ${endDayInfo.latestReturnTime} turnover before next pick-up)`;
+    }
+
     if (selectedStartDate && selectedEndDate && selectedStartDate !== selectedEndDate) {
-      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} from ${formatFullDate(selectedStartDate)} to ${formatFullDate(selectedEndDate)} (${selectedDurationDays} Day/s). Can I confirm these dates are available for reservation?`;
+      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} from ${formatFullDate(selectedStartDate)} to ${formatFullDate(selectedEndDate)} (${selectedDurationDays} Day/s)${timingNotes}. Can I confirm these dates are available for reservation?`;
     } else if (selectedStartDate) {
-      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} for ${formatFullDate(selectedStartDate)} (1 Day/s). Can I confirm these dates are available for reservation?`;
+      return `Hi Miranda Rentals and Services! I checked your availability calendar and I would like to inquire about booking a ${vehicleText} for ${formatFullDate(selectedStartDate)} (1 Day/s)${timingNotes}. Can I confirm these dates are available for reservation?`;
     }
     return `Hi Miranda Rentals and Services! I would like to inquire about available dates for booking a ${vehicleText}.`;
-  }, [selectedStartDate, selectedEndDate, selectedDurationDays, vehicleFilter]);
+  }, [selectedStartDate, selectedEndDate, selectedDurationDays, vehicleFilter, filteredBookings]);
 
   const FB_PAGE_URL = 'https://www.facebook.com/share/1HMfSvhijx/?mibextid=wwXIfr';
   const MESSENGER_URL = `https://m.me/1193134077224088?text=${encodeURIComponent(inquiryMessage)}`;
@@ -274,26 +318,17 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
           
           {/* Top Controls Toolbar: Clean, Symmetrical & Fully Responsive */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
-            {/* Fleet Filter: Equal 3-column segmented button */}
+            {/* Fleet Filter: Equal 2-column segmented button */}
             <div className="w-full sm:w-auto">
-              <div className="grid grid-cols-3 p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-semibold h-10 items-center sm:min-w-[240px]">
-                <button
-                  id="filter-all-fleet-btn"
-                  type="button"
-                  onClick={() => setVehicleFilter('all')}
-                  className={`h-8 px-3 rounded-lg transition-all flex items-center justify-center text-center ${
-                    vehicleFilter === 'all'
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900 font-medium'
-                  }`}
-                >
-                  All
-                </button>
+              <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-semibold h-10 items-center sm:min-w-[180px]">
                 <button
                   id="filter-car-btn"
                   type="button"
-                  onClick={() => setVehicleFilter('Car')}
-                  className={`h-8 px-3 rounded-lg transition-all flex items-center justify-center text-center ${
+                  onClick={() => {
+                    setVehicleFilter('Car');
+                    setRangeWarning(null);
+                  }}
+                  className={`h-8 px-4 rounded-lg transition-all flex items-center justify-center text-center ${
                     vehicleFilter === 'Car'
                       ? 'bg-white text-slate-900 shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900 font-medium'
@@ -304,8 +339,11 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                 <button
                   id="filter-van-btn"
                   type="button"
-                  onClick={() => setVehicleFilter('Van')}
-                  className={`h-8 px-3 rounded-lg transition-all flex items-center justify-center text-center ${
+                  onClick={() => {
+                    setVehicleFilter('Van');
+                    setRangeWarning(null);
+                  }}
+                  className={`h-8 px-4 rounded-lg transition-all flex items-center justify-center text-center ${
                     vehicleFilter === 'Van'
                       ? 'bg-white text-slate-900 shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900 font-medium'
@@ -349,7 +387,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
           </div>
 
-          {/* Symmetrical Color Legends (Red for Booked, Green for Available, Blue for Selected, Yellow for Today) */}
+          {/* Symmetrical Color Legends (Green for Available, Red for Booked, Slate for Today, Blue for Selected) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-700">
             <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100 shrink-0" />
@@ -360,8 +398,8 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
               <span className="font-semibold text-red-700 text-center truncate">Booked</span>
             </div>
             <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-amber-100 shrink-0" />
-              <span className="font-semibold text-amber-800 text-center truncate">Today</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-900 ring-2 ring-slate-300 shrink-0" />
+              <span className="font-bold text-slate-900 text-center truncate">Today</span>
             </div>
             <div className="flex items-center justify-center gap-2 py-1.5 px-2 bg-white rounded-lg border border-slate-200/60 shadow-2xs">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-600 ring-2 ring-blue-100 shrink-0" />
@@ -390,26 +428,38 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                 const isSelectedEnd = selectedEndDate === day.dateString;
                 const isInSelectedRange = isDayInSelectionRange(day.dateString);
 
-                let bgClass = 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800 shadow-2xs';
+                let bgClass = 'bg-white hover:bg-slate-50/80 border border-slate-200/80 text-slate-800 shadow-2xs hover:border-slate-300';
                 let textClass = day.isCurrentMonth ? 'text-slate-800' : 'text-slate-300';
 
                 if (day.isPast) {
-                  bgClass = 'bg-slate-100/70 border-slate-200/60 opacity-50 cursor-not-allowed';
+                  bgClass = 'bg-slate-100/60 border border-slate-200/50 opacity-45 cursor-not-allowed';
                 } else if (isSelectedStart || isSelectedEnd) {
-                  bgClass = 'bg-blue-600 text-white font-bold ring-2 ring-blue-500 shadow-md shadow-blue-500/20';
+                  bgClass = 'bg-blue-600 text-white font-bold ring-2 ring-blue-500 shadow-md shadow-blue-500/20 z-10';
                   textClass = 'text-white';
                 } else if (isInSelectedRange) {
-                  bgClass = 'bg-blue-50/90 border-blue-300 text-blue-900 font-semibold';
+                  bgClass = 'bg-blue-50/80 border border-blue-200/90 text-blue-900 font-semibold';
                   textClass = 'text-blue-950';
                 } else if (day.isToday) {
-                  // Today is the ONLY date with an amber border
-                  bgClass = !dayStatus.isClickable 
-                    ? 'bg-red-50/50 border-2 border-amber-400 text-red-900 cursor-not-allowed shadow-xs'
-                    : 'bg-amber-50/40 border-2 border-amber-400 text-slate-900 hover:border-amber-500 cursor-pointer shadow-xs';
+                  // Today: Crisp clean background with lighter, refined border
+                  if (!dayStatus.isClickable) {
+                    bgClass = 'bg-red-50/40 border border-slate-400/70 text-red-900 cursor-not-allowed shadow-2xs';
+                  } else if (dayStatus.isBackToBack) {
+                    bgClass = 'bg-red-50/40 border border-slate-400/70 text-red-900 cursor-not-allowed shadow-2xs';
+                  } else if (dayStatus.isReturnDay || dayStatus.isStartDay) {
+                    bgClass = 'bg-red-50/30 hover:bg-red-50/60 border border-slate-400/80 text-slate-900 cursor-pointer shadow-2xs';
+                  } else {
+                    bgClass = 'bg-white hover:bg-slate-50/90 border border-slate-400/80 text-slate-900 cursor-pointer shadow-2xs';
+                  }
+                } else if (dayStatus.isBackToBack) {
+                  // Rule 4: Normal design of return and pickup, not clickable/selectable
+                  bgClass = 'bg-red-50/40 border border-red-200/70 text-red-900 cursor-not-allowed';
+                } else if (dayStatus.isReturnDay || dayStatus.isStartDay) {
+                  // Both Return/Drop-off and Pick-up use the same clean return-day design
+                  bgClass = 'bg-red-50/30 hover:bg-red-50/60 border border-red-200/90 hover:border-red-300 text-slate-900 cursor-pointer shadow-2xs';
                 } else if (!dayStatus.isClickable) {
-                  bgClass = 'bg-red-50/50 border border-red-200/80 text-red-900 cursor-not-allowed';
+                  bgClass = 'bg-red-50/40 border border-red-200/70 text-red-900 cursor-not-allowed';
                 } else if (day.isCurrentMonth) {
-                  bgClass = 'bg-white hover:bg-slate-50 border border-slate-200 hover:border-blue-400 cursor-pointer';
+                  bgClass = 'bg-white hover:bg-slate-50/90 border border-slate-200/80 hover:border-blue-300 cursor-pointer shadow-2xs';
                 }
 
                 return (
@@ -419,37 +469,61 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                     disabled={day.isPast || !dayStatus.isClickable}
                     onClick={() => handleDayClick(day.dateString, day.isPast, dayStatus.isClickable)}
                     onMouseEnter={() => setHoverDate(day.dateString)}
-                    className={`min-h-[56px] sm:min-h-[92px] p-1 sm:p-2 rounded-xl flex flex-col justify-between text-left transition-all relative overflow-hidden ${bgClass}`}
+                    className={`min-h-[58px] sm:min-h-[94px] p-1.5 sm:p-2 rounded-xl flex flex-col justify-between text-left transition-all duration-150 relative overflow-hidden ${bgClass}`}
                   >
                     {/* Header: Day number */}
                     <div className="flex items-center justify-between w-full">
-                      <span
-                        className={`text-xs sm:text-sm font-bold ${
-                          isSelectedStart || isSelectedEnd
-                            ? 'text-white'
-                            : day.isToday
-                            ? 'text-amber-900 ring-1 ring-amber-400 bg-amber-100/90 px-1 sm:px-1.5 py-0.5 rounded-md'
-                            : textClass
-                        }`}
-                      >
-                        {day.dayOfMonth}
-                      </span>
+                      {day.isToday && !isSelectedStart && !isSelectedEnd ? (
+                        <span className="text-xs sm:text-sm font-black text-slate-900">
+                          {day.dayOfMonth}
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-xs sm:text-sm font-bold ${
+                            isSelectedStart || isSelectedEnd
+                              ? 'text-white'
+                              : textClass
+                          }`}
+                        >
+                          {day.dayOfMonth}
+                        </span>
+                      )}
                     </div>
 
-                    {/* Middle: Centered Status Legend Dot */}
-                    {day.isCurrentMonth && !day.isPast && (
+                    {/* Middle: Centered Status Indicator (ChevronLeft for Pick-up, ChevronRight for Drop-off, dot icons for middle and turnover days) */}
+                    {!day.isPast && (
                       <div className="my-auto flex items-center justify-center pointer-events-none py-0.5">
-                        {dayStatus.isBooked ? (
+                        {isSelectedStart || isSelectedEnd ? (
+                          <span className="w-2 h-2 rounded-full bg-white ring-2 ring-blue-300" />
+                        ) : isInSelectedRange ? (
+                          <span className="w-2 h-2 rounded-full bg-blue-500 ring-2 ring-blue-200" />
+                        ) : dayStatus.isBackToBack ? (
+                          /* Turnover / In-between days inside continuous booking ranges use the red dot icon */
+                          <span
+                            className="w-2 h-2 rounded-full bg-red-500 ring-2 ring-red-200"
+                            title={`Turnover Day - Drop-off at ${dayStatus.returnTime || 'AM'} & Pick-up at ${dayStatus.departureTime || 'PM'}`}
+                          />
+                        ) : dayStatus.isStartDay ? (
+                          /* Pick-up Day Icon */
+                          <ChevronLeft
+                            className="w-4 h-4 text-red-600 shrink-0 stroke-[2.5]"
+                            title={`Pick-up Day - Outgoing rental departs at ${dayStatus.departureTime || 'PM'} (Must return 4h before)`}
+                          />
+                        ) : dayStatus.isReturnDay ? (
+                          /* Drop-off Day Icon */
+                          <ChevronRight
+                            className="w-4 h-4 text-red-600 shrink-0 stroke-[2.5]"
+                            title={`Drop-off Day - Incoming rental returns at ${dayStatus.returnTime || 'AM'} (Ready after 4h turnover prep at ${dayStatus.readyTime || 'PM'})`}
+                          />
+                        ) : dayStatus.isBooked ? (
                           <span className="w-2 h-2 rounded-full bg-red-500 ring-2 ring-red-200" title="Booked" />
-                        ) : isInSelectedRange || isSelectedStart || isSelectedEnd ? (
-                          <span className={`w-2 h-2 rounded-full ${isSelectedStart || isSelectedEnd ? 'bg-white' : 'bg-blue-500'}`} />
-                        ) : (
+                        ) : day.isCurrentMonth ? (
                           <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-100" title="Available" />
-                        )}
+                        ) : null}
                       </div>
                     )}
 
-                    {/* Booking badge indicators / Selection status marker (Desktop only - No text on mobile dates) */}
+                    {/* Booking badge indicators / Selection status marker (Desktop only) */}
                     <div className="hidden sm:block space-y-0.5 w-full">
                       {isSelectedStart || isSelectedEnd ? (
                         <div className="text-[10px] font-bold text-center px-1 py-0.5 rounded bg-white/20 text-white truncate">
@@ -461,20 +535,23 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                             <span>End</span>
                           )}
                         </div>
+                      ) : dayStatus.isBackToBack ? (
+                        <div className="px-1 py-0.5 rounded text-[10px] font-bold flex items-center justify-start gap-1 truncate bg-red-100 text-red-700 border border-red-200">
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-red-600" />
+                          <span className="truncate">Booked</span>
+                        </div>
+                      ) : dayStatus.isStartDay ? (
+                        <div className="px-1.5 py-0.5 rounded text-[9px] font-bold text-center truncate bg-red-50 text-red-800 border border-red-200/80">
+                          Pick-up {dayStatus.departureTime || 'PM'}
+                        </div>
+                      ) : dayStatus.isReturnDay ? (
+                        <div className="px-1.5 py-0.5 rounded text-[9px] font-bold text-center truncate bg-red-50 text-red-800 border border-red-200/80">
+                          Drop-off {dayStatus.returnTime || 'AM'}
+                        </div>
                       ) : dayStatus.isBooked ? (
-                        <div className="space-y-0.5">
-                          {dayStatus.carBooked && (vehicleFilter === 'all' || vehicleFilter === 'Car') && (
-                            <div className="px-1 py-0.5 rounded text-[10px] font-bold flex items-center justify-start gap-1 truncate bg-red-100 text-red-700 border border-red-200">
-                              <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-red-600" />
-                              <span className="truncate">Car Booked</span>
-                            </div>
-                          )}
-                          {dayStatus.vanBooked && (vehicleFilter === 'all' || vehicleFilter === 'Van') && (
-                            <div className="px-1 py-0.5 rounded text-[10px] font-bold flex items-center justify-start gap-1 truncate bg-red-100 text-red-700 border border-red-200">
-                              <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-red-600" />
-                              <span className="truncate">Van Booked</span>
-                            </div>
-                          )}
+                        <div className="px-1 py-0.5 rounded text-[10px] font-bold flex items-center justify-start gap-1 truncate bg-red-100 text-red-700 border border-red-200">
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-red-600" />
+                          <span className="truncate">Booked</span>
                         </div>
                       ) : !day.isPast && day.isCurrentMonth ? (
                         <div className="text-[9px] text-emerald-700 font-semibold flex items-center justify-center gap-1">
@@ -509,6 +586,40 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
           </div>
         )}
 
+        {/* Drop-off Turnover Pickup Time Restriction Notice */}
+        {selectedStartDate && getDayAvailability(selectedStartDate).isReturnDay && (
+          <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-amber-900 shadow-xs animate-fade-in">
+            <div className="flex items-start gap-2.5">
+              <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-bold text-amber-950">Drop-off Turnover Schedule Notice: </strong>
+                <span>
+                  {formatFullDate(selectedStartDate)} is a vehicle drop-off date (Drop-off at {getDayAvailability(selectedStartDate).returnTime || 'scheduled time'}). You can only book from{' '}
+                  <strong className="font-bold text-amber-950">{getDayAvailability(selectedStartDate).readyTime || 'afternoon'} onwards</strong>{' '}
+                  (allows 4-hour cleaning and sanitation turnover after vehicle return).
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pick-up Turnover Return Time Restriction Notice */}
+        {selectedEndDate && getDayAvailability(selectedEndDate).isStartDay && (
+          <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-amber-900 shadow-xs animate-fade-in">
+            <div className="flex items-start gap-2.5">
+              <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-bold text-amber-950">Pick-up Turnover Schedule Notice: </strong>
+                <span>
+                  {formatFullDate(selectedEndDate)} is an outgoing pick-up date (Pick-up at {getDayAvailability(selectedEndDate).departureTime || 'scheduled time'}). You must return the vehicle by{' '}
+                  <strong className="font-bold text-amber-950">{getDayAvailability(selectedEndDate).latestReturnTime || 'morning'}</strong>{' '}
+                  (allows 4-hour cleaning and sanitation turnover before next pick-up).
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Selected Dates Booking & Inquiry Box */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
@@ -530,7 +641,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
                     )}
                   </span>
                 ) : (
-                  <span>Click on any available date above to start your reservation</span>
+                  <span>Click on any available date or return date above to start your reservation</span>
                 )}
               </h2>
               <p className="text-xs text-slate-500">
@@ -698,20 +809,52 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {/* Guide 1 */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
-                <CreditCard className="w-4 h-4 text-blue-600 shrink-0" />
-                <span>Security Deposit</span>
+            {/* Guide 1: ₱300 Booking Deposit (Clean & Expandable) */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                  <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+                    <CreditCard className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>Booking Deposit (₱300)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDepositDetails(!showDepositDetails)}
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-700 bg-blue-50/80 hover:bg-blue-100/70 border border-blue-200/60 px-1.5 py-0.5 rounded transition-all cursor-pointer"
+                    title="Why do I need to pay a ₱300 deposit?"
+                  >
+                    <HelpCircle className="w-3 h-3 text-blue-600" />
+                    <span className="font-semibold">{showDepositDetails ? 'Hide details' : 'Why ₱300?'}</span>
+                    <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${showDepositDetails ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Advanced ₱300 deposit to secure calendar slot. Deducted from total rental fee upon checkout.
+                </p>
               </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                A refundable security deposit is collected before turnover and returned in full upon vehicle checkout after inspection.
-              </p>
+
+              {/* Expandable Breakdown Drawer */}
+              {showDepositDetails && (
+                <div className="mt-2 pt-2.5 border-t border-slate-200/80 space-y-1.5 text-[11px] text-slate-600 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="flex items-start gap-1.5">
+                    <span className="w-3.5 h-3.5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">1</span>
+                    <p><strong className="text-slate-800">Deducted from Total:</strong> Counts toward your final payment.</p>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className="w-3.5 h-3.5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">2</span>
+                    <p><strong className="text-slate-800">Locks in your Ride:</strong> Calendar dates are blocked exclusively for you.</p>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className="w-3.5 h-3.5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">3</span>
+                    <p><strong className="text-slate-800">Non-Refundable:</strong> Covers lost opportunity if trip is cancelled.</p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Guide 2 */}
+            {/* Guide 2: Fuel Policy */}
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <Fuel className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>Fuel Policy</span>
               </div>
@@ -720,9 +863,9 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
               </p>
             </div>
 
-            {/* Guide 3 */}
+            {/* Guide 3: Damage Accountability */}
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>Damage Accountability</span>
               </div>
@@ -731,9 +874,9 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
               </p>
             </div>
 
-            {/* Guide 4 */}
+            {/* Guide 4: OR/CR & RFID */}
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <Radio className="w-4 h-4 text-indigo-600 shrink-0" />
                 <span>OR/CR & RFID Security Responsibility</span>
               </div>
@@ -742,9 +885,20 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
               </p>
             </div>
 
-            {/* Guide 5 */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 md:col-span-2 lg:col-span-2">
-              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
+            {/* Guide 5: 22-Hour Rental Window & 4-Hour Cleaning Turnover */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
+                <Clock className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>22-Hour Daily Rental & Cleaning Window</span>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Each rental day covers 22 hours (return is exactly 2 hours prior to 24-hour cycle). This allows a 4-hour window for thorough cleaning and sanitation before the next booking.
+              </p>
+            </div>
+
+            {/* Guide 6: Limitation of Liability */}
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 md:col-span-2 lg:col-span-3">
+              <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>Limitation of Liability & Accident Waiver</span>
               </div>

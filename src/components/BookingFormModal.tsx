@@ -209,15 +209,21 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     onSubmit(bookingData);
   };
 
-  // Real-time calculated end preview & conflict check
+  // Real-time calculated end preview, turnover ready time, & conflict check
   let calculatedEndPreview = '';
+  let turnaroundReadyPreview = '';
   const numDays = Number(noOfDays);
+  const totalRentalHours = !isNaN(numDays) && numDays >= 1 ? (numDays * 24) - 2 : 0;
+
   if (startDate && startTime && !isNaN(numDays) && numDays >= 1) {
     try {
       const endDt = getBookingEndDateTime({ startDate, startTime, noOfDays: numDays });
       calculatedEndPreview = formatDateTime(endDt);
+      const readyDt = new Date(endDt.getTime() + 4 * 60 * 60 * 1000);
+      turnaroundReadyPreview = formatDateTime(readyDt);
     } catch {
       calculatedEndPreview = '';
+      turnaroundReadyPreview = '';
     }
   }
 
@@ -676,18 +682,33 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
               </div>
             </div>
 
-            {/* Calculated Return Time Preview Pill */}
+            {/* Calculated Return Time Preview Pill with 22-Hour Rule */}
             {calculatedEndPreview && (
-              <div className="mt-3 p-3 bg-slate-900 text-slate-100 rounded-lg text-xs flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>
-                    Scheduled Return: <strong className="text-white font-mono">{calculatedEndPreview}</strong>
-                  </span>
+              <div className="mt-3 space-y-1.5">
+                <div className="p-3 bg-slate-900 text-slate-100 rounded-lg text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>
+                      Scheduled Return (22h Rule): <strong className="text-white font-mono">{calculatedEndPreview}</strong>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                    <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-emerald-400 border border-slate-700 font-bold">
+                      {totalRentalHours}h Total Rental
+                    </span>
+                    <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700">
+                      -2h Buffer
+                    </span>
+                  </div>
                 </div>
-                <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700">
-                  {Number(noOfDays || 0) * 24} Hours Total
-                </span>
+
+                {/* Clear Policy Note */}
+                <div className="px-3 py-2 bg-blue-50/80 border border-blue-200/80 rounded-lg text-[11px] text-blue-900 flex items-start gap-2">
+                  <Info className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">
+                    <strong>22-Hour Rental Rule:</strong> Each rental day covers 22 hours (return is 2 hours before the 24-hour cycle). Next customer booking ready at <span className="font-mono font-bold text-blue-950">{turnaroundReadyPreview}</span> (4-hour cleaning window).
+                  </p>
+                </div>
               </div>
             )}
 

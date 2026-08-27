@@ -3,12 +3,13 @@ import {
   Clock, ShieldCheck, MapPin, Phone, Car, 
   Calendar, CheckCircle2, Navigation, RefreshCw, 
   User, Info, AlertOctagon, Sparkles, FileText,
-  MessageCircle, Facebook, Copy, Check
+  MessageCircle, Facebook, Copy, Check, AlertTriangle
 } from 'lucide-react';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
 import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly, getBookingStartDateTime } from '../utils/dateUtils';
+import { loadBookings } from '../utils/storage';
 
 interface RenterTrackerViewProps {
   booking: Booking | null;
@@ -18,6 +19,9 @@ interface RenterTrackerViewProps {
   onLookupId?: (id: string) => void;
 }
 
+// In-memory cache for looked up tracker bookings to avoid re-hitting database
+const trackerMemoryCache = new Map<string, Booking | null>();
+
 export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   booking,
   bookingId,
@@ -26,8 +30,26 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
   onLookupId,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [remoteBooking, setRemoteBooking] = useState<Booking | null>(booking);
-  const [isLoading, setIsLoading] = useState(!booking && !!bookingId);
+  const [remoteBooking, setRemoteBooking] = useState<Booking | null>(() => {
+    if (booking) return booking;
+    if (bookingId) {
+      if (trackerMemoryCache.has(bookingId)) {
+        return trackerMemoryCache.get(bookingId) || null;
+      }
+      // Check local cached bookings
+      const local = loadBookings();
+      const match = local.find(
+        (b) => b.id.toLowerCase() === bookingId.toLowerCase() || 
+               (b.trackingToken && b.trackingToken.toLowerCase() === bookingId.toLowerCase())
+      );
+      if (match) {
+        trackerMemoryCache.set(bookingId, match);
+        return match;
+      }
+    }
+    return null;
+  });
+  const [isLoading, setIsLoading] = useState(!booking && !!bookingId && !trackerMemoryCache.has(bookingId || ''));
   const [copiedLink, setCopiedLink] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [searchError, setSearchError] = useState('');
@@ -40,14 +62,28 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch or real-time subscribe from Firestore if not in local memory
+  // Fetch or real-time subscribe from Firestore only if not in local storage / memory
   useEffect(() => {
     if (booking) {
       setRemoteBooking(booking);
+      if (bookingId) trackerMemoryCache.set(bookingId, booking);
       setIsLoading(false);
       return;
     }
     if (!bookingId) {
+      setIsLoading(false);
+      return;
+    }
+
+    // 1. Check local storage first to save database hits
+    const local = loadBookings();
+    const match = local.find(
+      (b) => b.id.toLowerCase() === bookingId.toLowerCase() || 
+             (b.trackingToken && b.trackingToken.toLowerCase() === bookingId.toLowerCase())
+    );
+    if (match) {
+      setRemoteBooking(match);
+      trackerMemoryCache.set(bookingId, match);
       setIsLoading(false);
       return;
     }
@@ -62,9 +98,12 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
         (snapshot) => {
           if (!isSubscribed) return;
           if (!snapshot.empty) {
-            setRemoteBooking(snapshot.docs[0].data() as Booking);
+            const data = snapshot.docs[0].data() as Booking;
+            setRemoteBooking(data);
+            trackerMemoryCache.set(bookingId, data);
           } else {
             setRemoteBooking(null);
+            trackerMemoryCache.set(bookingId, null);
           }
           setIsLoading(false);
         },
@@ -86,16 +125,21 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
       (docSnap) => {
         if (!isSubscribed) return;
         if (docSnap.exists()) {
-          setRemoteBooking(docSnap.data() as Booking);
+          const data = docSnap.data() as Booking;
+          setRemoteBooking(data);
+          trackerMemoryCache.set(bookingId, data);
           setIsLoading(false);
         } else {
           // Fallback check by trackingToken query
           const q = query(collection(db, 'bookings'), where('trackingToken', '==', bookingId));
           const unsubFallback = onSnapshot(q, (snapshot) => {
             if (!snapshot.empty) {
-              setRemoteBooking(snapshot.docs[0].data() as Booking);
+              const data = snapshot.docs[0].data() as Booking;
+              setRemoteBooking(data);
+              trackerMemoryCache.set(bookingId, data);
             } else {
               setRemoteBooking(null);
+              trackerMemoryCache.set(bookingId, null);
             }
             setIsLoading(false);
           }, () => setIsLoading(false));
@@ -189,14 +233,29 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
             <Car className="w-8 h-8 text-blue-500" />
           </div>
 
-          <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Live Rental Tracker</h1>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1.5">
-              {bookingId 
-                ? `Booking "${bookingId}" could not be located. Enter your Booking ID below.`
-                : 'Enter your Booking ID or Tracking Reference to view live rental status.'}
-            </p>
-          </div>
+          {bookingId ? (
+            <div className="space-y-3">
+              <h1 className="text-2xl font-bold text-white tracking-tight">Live Rental Tracker</h1>
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-left flex items-start gap-3 shadow-lg shadow-amber-950/20">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
+                    Warning
+                  </span>
+                  <p className="text-xs sm:text-sm text-amber-100 font-medium leading-relaxed">
+                    Booking ID &ldquo;<span className="font-mono text-amber-300 font-semibold">{bookingId}</span>&rdquo; could not be located. Enter a valid Booking ID below
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <h1 className="text-2xl font-bold text-white tracking-tight">Live Rental Tracker</h1>
+              <p className="text-xs sm:text-sm text-slate-400 mt-1.5">
+                Enter your Booking ID or Tracking Reference to view live rental status.
+              </p>
+            </div>
+          )}
 
           <form onSubmit={handleSearchSubmit} className="space-y-3 text-left">
             <div className="relative">
@@ -529,7 +588,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
                 Trip Itinerary & Hubs
               </h3>
               <span className="text-[11px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md">
-                {activeBooking.noOfDays} Day{activeBooking.noOfDays > 1 ? 's' : ''} ({activeBooking.noOfDays * 24}h)
+                {activeBooking.noOfDays} Day{activeBooking.noOfDays > 1 ? 's' : ''} ({(activeBooking.noOfDays * 24) - 2}h Duration)
               </span>
             </div>
 

@@ -24,23 +24,48 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
   const [error, setError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const [lockoutRemaining, setLockoutRemaining] = useState(0);
   const pinInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     pinInputRef.current?.focus();
   }, []);
 
+  // Countdown timer for lockout cooldown
+  useEffect(() => {
+    if (lockoutRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutRemaining((prev) => {
+        if (prev <= 1) {
+          setError('');
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutRemaining]);
+
   const performVerification = async (pinToVerify: string) => {
-    if (isVerifying) return;
+    if (isVerifying || lockoutRemaining > 0) return;
     setIsVerifying(true);
     setError('');
 
     try {
       const isValid = await verifyAdminPinAsync(pinToVerify);
       if (isValid) {
+        setAttempts(0);
         onUnlock();
       } else {
-        setError('Incorrect Admin PIN. Access Denied.');
+        const nextAttempts = attempts + 1;
+        setAttempts(nextAttempts);
+        if (nextAttempts >= 5) {
+          setLockoutRemaining(15);
+          setError('Too many failed attempts. Please wait 15 seconds.');
+        } else {
+          setError(`Incorrect Admin PIN. Access Denied. (${5 - nextAttempts} attempts left)`);
+        }
         triggerShake();
         setPin('');
       }
@@ -54,6 +79,10 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
 
   const handlePinSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (lockoutRemaining > 0) {
+      setError(`Please wait ${lockoutRemaining}s before retrying.`);
+      return;
+    }
     setError('');
 
     if (!pin.trim()) {
@@ -71,7 +100,7 @@ export const AdminLockScreen: React.FC<AdminLockScreenProps> = ({
   };
 
   const handleKeypadPress = (digit: string) => {
-    if (isVerifying) return;
+    if (isVerifying || lockoutRemaining > 0) return;
     if (pin.length < 6) {
       const nextPin = pin + digit;
       setPin(nextPin);
