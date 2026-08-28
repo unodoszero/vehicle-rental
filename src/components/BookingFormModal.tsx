@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, Calendar, Clock, MapPin, Phone, User, Users, Car, 
-  ShieldCheck, FileText, AlertCircle, Info, Sparkles, Hash, AlertTriangle
+  ShieldCheck, FileText, AlertCircle, Info, Sparkles, Hash, AlertTriangle,
+  Building2, Edit3, ToggleLeft, ToggleRight
 } from 'lucide-react';
 import { Booking, VehicleType } from '../types';
 import { generateBookingId, getRandomColorTag, generateTrackingToken } from '../utils/storage';
@@ -13,6 +14,11 @@ import {
   toISODateString,
   checkBookingConflicts
 } from '../utils/dateUtils';
+
+export const PRESET_PICKUP_LOCATIONS = [
+  'Isle of Patmos, Zone 2, Barangay Culipat, Tarlac City, Tarlac',
+  'Lot 35 Blk 27 Maasikaso St. Fiesta Communities Matatalaib Tarlac City, Tarlac 2300'
+];
 
 interface BookingFormModalProps {
   isOpen: boolean;
@@ -43,7 +49,8 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
   const [licenseNumber, setLicenseNumber] = useState('');
   const [licenseExpiration, setLicenseExpiration] = useState('');
   const [passengers, setPassengers] = useState<number | string>(2);
-  const [startLocation, setStartLocation] = useState('');
+  const [isPickupPreset, setIsPickupPreset] = useState(true);
+  const [startLocation, setStartLocation] = useState(PRESET_PICKUP_LOCATIONS[0]);
   const [destination, setDestination] = useState('');
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('09:00');
@@ -80,7 +87,16 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       }
 
       setPassengers(editingBooking.passengers);
-      setStartLocation(editingBooking.startLocation);
+      const existingStart = editingBooking.startLocation || '';
+      setStartLocation(existingStart);
+      if (existingStart && PRESET_PICKUP_LOCATIONS.includes(existingStart)) {
+        setIsPickupPreset(true);
+      } else if (existingStart) {
+        setIsPickupPreset(false);
+      } else {
+        setIsPickupPreset(true);
+        setStartLocation(PRESET_PICKUP_LOCATIONS[0]);
+      }
       setDestination(editingBooking.destination);
       setStartDate(editingBooking.startDate);
       setStartTime(editingBooking.startTime);
@@ -103,7 +119,8 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setLicenseNumber('');
       setLicenseExpiration('');
       setPassengers(2);
-      setStartLocation('');
+      setIsPickupPreset(true);
+      setStartLocation(PRESET_PICKUP_LOCATIONS[0]);
       setDestination('');
       setStartDate(defaultDateStr);
       setStartTime('09:00');
@@ -559,36 +576,140 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
 
           {/* Section: Route & Location */}
           <div className="pt-2 border-t border-slate-100">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-slate-400" />
-              3. Route Details
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                3. Route Details
+              </label>
+
+              {/* Pickup Mode Toggle */}
+              <button
+                type="button"
+                id="booking-pickup-preset-toggle"
+                onClick={() => {
+                  const next = !isPickupPreset;
+                  setIsPickupPreset(next);
+                  if (next && !PRESET_PICKUP_LOCATIONS.includes(startLocation)) {
+                    setStartLocation(PRESET_PICKUP_LOCATIONS[0]);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                  isPickupPreset
+                    ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                }`}
+                title="Toggle between Garage Pickup presets and Custom Location input"
+              >
+                {isPickupPreset ? (
+                  <>
+                    <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span>Garage Pickup</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  </>
+                ) : (
+                  <>
+                    <Edit3 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span>Custom Location</span>
+                    <span className="w-2 h-2 rounded-full bg-slate-400" />
+                  </>
+                )}
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Start Location (Preset Dropdown or Custom Input) */}
               <div className="min-w-0">
-                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Start Location <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    id="booking-startlocation-input"
-                    type="text"
-                    required
-                    value={startLocation}
-                    onChange={(e) => setStartLocation(e.target.value)}
-                    placeholder="Tarlac City, Tarlac"
-                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.startLocation ? 'border-red-400' : 'border-slate-200'
-                    }`}
-                  />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                    Start Location <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-slate-600 font-medium">
+                    {isPickupPreset ? 'Preset Hub' : 'Custom Input'}
+                  </span>
                 </div>
+
+                {isPickupPreset ? (
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <Building2 className="w-4 h-4 text-blue-600 absolute left-3 top-3 pointer-events-none" />
+                      <select
+                        id="booking-startlocation-select"
+                        required
+                        value={startLocation}
+                        onChange={(e) => setStartLocation(e.target.value)}
+                        className={`w-full min-w-0 max-w-full block box-border pl-9 pr-8 py-2.5 text-xs bg-blue-50/50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800 appearance-none cursor-pointer ${
+                          errors.startLocation ? 'border-red-400' : 'border-blue-200'
+                        }`}
+                      >
+                        <option value={PRESET_PICKUP_LOCATIONS[0]}>
+                          Isle of Patmos, Zone 2, Barangay Culipat, Tarlac City
+                        </option>
+                        <option value={PRESET_PICKUP_LOCATIONS[1]}>
+                          Lot 35 Blk 27 Maasikaso St. Fiesta Communities Matatalaib
+                        </option>
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
+                        <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
+                          <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
+                        </svg>
+                      </div>
+                    </div>
+
+                    {/* Quick Preset Selector Buttons */}
+                    <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setStartLocation(PRESET_PICKUP_LOCATIONS[0])}
+                        className={`text-left p-1.5 rounded-md border text-[10px] leading-tight transition-all ${
+                          startLocation === PRESET_PICKUP_LOCATIONS[0]
+                            ? 'bg-blue-100/70 border-blue-300 font-bold text-blue-900 shadow-xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="block text-blue-700 font-bold">Zone 2 Culipat</span>
+                        <span className="text-[9px] text-slate-500 block truncate">Isle of Patmos</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setStartLocation(PRESET_PICKUP_LOCATIONS[1])}
+                        className={`text-left p-1.5 rounded-md border text-[10px] leading-tight transition-all ${
+                          startLocation === PRESET_PICKUP_LOCATIONS[1]
+                            ? 'bg-blue-100/70 border-blue-300 font-bold text-blue-900 shadow-xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="block text-blue-700 font-bold">Fiesta Communities</span>
+                        <span className="text-[9px] text-slate-500 block truncate">Matatalaib</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                    <input
+                      id="booking-startlocation-input"
+                      type="text"
+                      required
+                      value={startLocation}
+                      onChange={(e) => setStartLocation(e.target.value)}
+                      placeholder="e.g. SM City Tarlac, Matatalaib, etc."
+                      className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        errors.startLocation ? 'border-red-400' : 'border-slate-200'
+                      }`}
+                    />
+                  </div>
+                )}
                 {errors.startLocation && <p className="text-[11px] text-red-600 mt-1">{errors.startLocation}</p>}
               </div>
 
+              {/* Destination */}
               <div className="min-w-0">
-                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Destination <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                    Destination <span className="text-red-500">*</span>
+                  </label>
+                </div>
                 <div className="relative">
                   <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                   <input
@@ -597,7 +718,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                     required
                     value={destination}
                     onChange={(e) => setDestination(e.target.value)}
-                    placeholder="San Fernando, Pampanga"
+                    placeholder="e.g. San Fernando, Pampanga"
                     className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       errors.destination ? 'border-red-400' : 'border-slate-200'
                     }`}

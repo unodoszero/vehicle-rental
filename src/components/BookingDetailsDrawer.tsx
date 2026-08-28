@@ -28,20 +28,28 @@ export const generateBookingConfirmationMessage = (booking: Booking): string => 
   const trackerUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/tracker?id=${encodeURIComponent(trackerKey)}`;
   const calc = calculateBookingTime(booking, new Date());
   const vehicleDesc = `${booking.vehicle}${booking.vehicleModel ? ` (${booking.vehicleModel})` : ''}${booking.plateNumber ? ` [Plate: ${booking.plateNumber}]` : ''}`;
+  const agreementContractUrl = "https://storage.googleapis.com/miranda-rentals-public/Miranda_Rentals_Agreement_Form_Placeholder.pdf";
   
   return `Hi ${booking.name}!
 
 Thank you for choosing Miranda Rentals and Services. Your reservation for the ${vehicleDesc} has been confirmed.
 
 Rental Schedule:
-• Pickup / Start: ${formatDateOnly(booking.startDate)} at ${formatTimeOnly(booking.startTime)}
+• Start: ${formatDateOnly(booking.startDate)} at ${formatTimeOnly(booking.startTime)}
+• Start Location: ${booking.startLocation}
 • Expected Return: ${formatDateOnly(calc.endDateTime)} at ${formatTimeOnly(calc.endDateTime)} (${booking.noOfDays} Day${booking.noOfDays > 1 ? 's' : ''})
+• Destination: ${booking.destination}
 • Service Type: ${booking.selfDrive ? 'Self-Drive' : 'With Driver'}
 • Reference No.: ${booking.id}
 
 The ${booking.vehicle.toLowerCase()} has been thoroughly cleaned, sanitized, and inspected for your journey.
 
-For full booking details, return instructions, and live status tracking, please open your secure link:
+📄 Rental Agreement & Contract Notice:
+We encourage you to review the Rental Agreement in advance:
+${agreementContractUrl}
+*Note: This agreement form will need to be physically signed upon the turnover of the vehicle.*
+
+For full live itinerary details, route directions, and live status tracking, please open your secure link:
 ${trackerUrl}
 
 Have a safe and pleasant trip! Please feel free to message us if you need any assistance.`;
@@ -224,7 +232,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
             <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
               <span className="text-slate-500">Driver Mode:</span>
               <span className={`font-bold px-2 py-0.5 rounded text-[11px] ${
-                booking.selfDrive ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-900'
+                booking.selfDrive ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-blue-50 text-blue-800 border border-blue-200'
               }`}>
                 {booking.selfDrive ? 'Self-Drive (Customer)' : 'Company Chauffeur'}
               </span>
@@ -357,7 +365,7 @@ export const BookingDetailsDrawer: React.FC<BookingDetailsDrawerProps> = ({
             <div className="relative rounded-xl border border-slate-200 bg-slate-50 overflow-hidden focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
               <textarea
                 id="customer-message-textarea"
-                rows={7}
+                rows={8}
                 value={customMessage}
                 onChange={(e) => setCustomMessage(e.target.value)}
                 className="w-full p-3 text-xs text-slate-800 bg-transparent border-0 resize-y font-sans leading-relaxed focus:outline-none"

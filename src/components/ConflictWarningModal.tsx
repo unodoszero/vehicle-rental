@@ -37,25 +37,25 @@ export const ConflictWarningModal: React.FC<ConflictWarningModalProps> = ({
     >
       <div
         id="conflict-warning-modal-card"
-        className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl border border-amber-200 overflow-hidden flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-lg bg-white rounded-xl shadow-2xl border border-sky-200 overflow-hidden flex flex-col max-h-[90vh]"
       >
-        {/* Amber Alert Header */}
-        <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-start gap-3.5">
-          <div className="w-9 h-9 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-amber-500/20">
+        {/* Sky Alert Header */}
+        <div className="bg-sky-50 border-b border-sky-200 px-6 py-4 flex items-start gap-3.5">
+          <div className="w-9 h-9 rounded-lg bg-sky-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-sky-500/20">
             <AlertTriangle className="w-5 h-5" />
           </div>
           <div className="flex-1">
             <h3 id="conflict-warning-title" className="text-base font-bold text-slate-900 leading-snug">
               Schedule Overlap Detected
             </h3>
-            <p className="text-[11px] text-amber-900/90 mt-0.5 leading-relaxed">
+            <p className="text-[11px] text-sky-900/90 mt-0.5 leading-relaxed">
               The requested time slot for this <strong>{proposedBooking.vehicle || 'Vehicle'}</strong> overlaps with {conflictingBookings.length} existing booking{conflictingBookings.length > 1 ? 's' : ''}.
             </p>
           </div>
           <button
             id="close-conflict-modal-btn"
             onClick={onCancel}
-            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-amber-100/50 transition-colors"
+            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-sky-100/50 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -132,7 +132,7 @@ export const ConflictWarningModal: React.FC<ConflictWarningModalProps> = ({
             id="force-proceed-conflict-btn"
             type="button"
             onClick={onProceed}
-            className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors shadow-md shadow-amber-600/20 active:scale-95"
+            className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-md shadow-blue-600/20 active:scale-95"
           >
             Override & Schedule Anyway
           </button>

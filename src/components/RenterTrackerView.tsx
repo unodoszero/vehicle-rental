@@ -3,13 +3,43 @@ import {
   Clock, ShieldCheck, MapPin, Phone, Car, 
   Calendar, CheckCircle2, Navigation, RefreshCw, 
   User, Info, AlertOctagon, Sparkles, FileText,
-  MessageCircle, Facebook, Copy, Check, AlertTriangle
+  MessageCircle, Facebook, Copy, Check, AlertTriangle,
+  ArrowDown, Flag, ExternalLink, Compass, FileCheck
 } from 'lucide-react';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
 import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly, getBookingStartDateTime } from '../utils/dateUtils';
 import { loadBookings } from '../utils/storage';
+
+// Preset garage pickup hubs with map coordinates / navigation deep-links
+export const PICKUP_HUBS = [
+  {
+    id: 'culipat',
+    name: 'Brgy. Culipat Tarlac',
+    address: 'Isle of Patmos, Zone 2, Barangay Culipat, Tarlac City, Tarlac',
+    matchKeywords: ['culipat', 'isle of patmos'],
+    googleMapsUrl: 'https://maps.app.goo.gl/r1SaNkcsxEFfnhPR9?g_st=ic',
+    appleMapsUrl: 'https://maps.apple/p/WIFN4EtdnB81Si',
+  },
+  {
+    id: 'fiesta',
+    name: 'Brgy. Matatalaib Tarlac',
+    address: 'Lot 35 Blk 27 Maasikaso St. Fiesta Communities Matatalaib Tarlac City, Tarlac 2300',
+    matchKeywords: ['fiesta', 'matatalaib', 'maasikaso'],
+    googleMapsUrl: 'https://maps.app.goo.gl/y6RXCnYA7cf7hZjNA?g_st=ic',
+    appleMapsUrl: 'https://maps.apple/p/RjryLea7afa78t',
+  }
+];
+
+export const findPickupHub = (locationStr?: string) => {
+  if (!locationStr) return null;
+  const locLower = locationStr.toLowerCase();
+  return PICKUP_HUBS.find(hub => 
+    locLower.includes(hub.address.toLowerCase()) || 
+    hub.matchKeywords.some(kw => locLower.includes(kw))
+  ) || null;
+};
 
 interface RenterTrackerViewProps {
   booking: Booking | null;
@@ -233,31 +263,11 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
             <Car className="w-8 h-8 text-blue-500" />
           </div>
 
-          {bookingId ? (
-            <div className="space-y-3">
-              <h1 className="text-2xl font-bold text-white tracking-tight">Live Rental Tracker</h1>
-              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-left flex items-start gap-3 shadow-lg shadow-amber-950/20">
-                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-0.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
-                    Warning
-                  </span>
-                  <p className="text-xs sm:text-sm text-amber-100 font-medium leading-relaxed">
-                    Booking ID &ldquo;<span className="font-mono text-amber-300 font-semibold">{bookingId}</span>&rdquo; could not be located. Enter a valid Booking ID below
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Live Rental Tracker</h1>
-              <p className="text-xs sm:text-sm text-slate-400 mt-1.5">
-                Enter your Booking ID or Tracking Reference to view live rental status.
-              </p>
-            </div>
-          )}
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold text-white tracking-tight">Live Rental Tracker</h1>
+          </div>
 
-          <form onSubmit={handleSearchSubmit} className="space-y-3 text-left">
+          <form onSubmit={handleSearchSubmit} className="space-y-3.5 text-left">
             <div className="relative">
               <input
                 type="text"
@@ -270,9 +280,26 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
                 className="w-full px-4 py-3.5 bg-slate-900 border border-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl text-base text-white placeholder-slate-500 outline-none transition-all"
               />
             </div>
-            {searchError && (
-              <p className="text-xs text-red-400 px-1">{searchError}</p>
+
+            {/* Notice placed below the textbox only when there is an invalid bookingId or search error */}
+            {(bookingId || searchError) && (
+              <div className="p-4 bg-sky-500/10 border border-sky-500/30 rounded-2xl text-left flex items-start gap-3 shadow-lg shadow-sky-950/20">
+                <AlertTriangle className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-sky-400 block">
+                    Notice
+                  </span>
+                  <p className="text-xs sm:text-sm text-sky-100 font-medium leading-relaxed">
+                    {bookingId ? (
+                      <>Booking ID &ldquo;<span className="font-mono text-sky-300 font-semibold">{bookingId}</span>&rdquo; could not be located. Enter a valid Booking ID below</>
+                    ) : (
+                      searchError
+                    )}
+                  </p>
+                </div>
+              </div>
             )}
+
             <button
               type="submit"
               className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 active:scale-98"
@@ -581,51 +608,144 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
         {/* Organized Booking Details Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Trip Logistics Card */}
-          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-blue-400" />
+          <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
+            {/* Header with Duration Pill */}
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-cyan-400" />
                 Trip Itinerary & Hubs
               </h3>
-              <span className="text-[11px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md">
-                {activeBooking.noOfDays} Day{activeBooking.noOfDays > 1 ? 's' : ''} ({(activeBooking.noOfDays * 24) - 2}h Duration)
+              <span className="text-[11px] font-mono font-bold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 px-2.5 py-0.5 rounded-lg shadow-xs">
+                {activeBooking.noOfDays} DAY{activeBooking.noOfDays > 1 ? 'S' : ''}
               </span>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
-                <span className="text-slate-400 text-[10px] block uppercase font-mono tracking-wider">
-                  Pickup / Start Location
-                </span>
-                <span className="font-bold text-white text-sm block mt-0.5">
-                  {activeBooking.startLocation}
-                </span>
-              </div>
+            {/* Stepper & Cards Layout */}
+            {(() => {
+              const pickupHub = findPickupHub(activeBooking.startLocation);
+              const startDisplayTitle = pickupHub ? pickupHub.name : activeBooking.startLocation;
+              const routeDirectionsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(activeBooking.startLocation)}&destination=${encodeURIComponent(activeBooking.destination)}`;
 
-              <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
-                <span className="text-slate-400 text-[10px] block uppercase font-mono tracking-wider">
-                  Destination / Return Point
-                </span>
-                <span className="font-bold text-white text-sm block mt-0.5">
-                  {activeBooking.destination}
-                </span>
-              </div>
-            </div>
+              return (
+                <div className="space-y-4">
+                  {/* Timeline Stepper Container */}
+                  <div className="relative flex items-stretch gap-3.5 pt-1">
+                    {/* Left Luminous Timeline Bar */}
+                    <div className="w-6 flex flex-col items-center shrink-0 select-none py-1">
+                      {/* Top Luminous Node */}
+                      <div className="w-5 h-5 rounded-full bg-slate-950 border-2 border-cyan-400 flex items-center justify-center shadow-[0_0_12px_rgba(34,211,238,0.55)] ring-4 ring-cyan-500/20 shrink-0">
+                        <div className="w-1.5 h-1.5 rounded-full bg-cyan-300 animate-pulse" />
+                      </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
-              <div className="p-2.5 bg-slate-950/50 rounded-lg border border-slate-800/60">
-                <span className="text-slate-500 text-[10px] block uppercase font-bold tracking-wider">Scheduled Start</span>
-                <strong className="text-slate-200 font-mono block mt-0.5 text-xs">
-                  {formatDateOnly(startDateTime)} • {formatTimeOnly(startDateTime)}
-                </strong>
-              </div>
-              <div className="p-2.5 bg-slate-950/50 rounded-lg border border-slate-800/60">
-                <span className="text-slate-500 text-[10px] block uppercase font-bold tracking-wider">Expected Return</span>
-                <strong className="text-slate-200 font-mono block mt-0.5 text-xs">
-                  {formatDateOnly(timeCalc.endDateTime)} • {formatTimeOnly(timeCalc.endDateTime)}
-                </strong>
-              </div>
-            </div>
+                      {/* Continuous Cyan Connecting Line with Midpoint Downward Arrow Node */}
+                      <div className="w-0.5 flex-1 min-h-[48px] bg-cyan-400 flex items-center justify-center my-0.5 relative">
+                        <div className="w-4 h-4 rounded-full bg-slate-950 border border-cyan-400 flex items-center justify-center shadow-[0_0_8px_rgba(34,211,238,0.4)]">
+                          <ArrowDown className="w-2.5 h-2.5 text-cyan-300 stroke-[3]" />
+                        </div>
+                      </div>
+
+                      {/* Bottom Luminous Node */}
+                      <div className="w-5 h-5 rounded-full bg-slate-950 border-2 border-cyan-400 flex items-center justify-center shadow-[0_0_12px_rgba(34,211,238,0.55)] ring-4 ring-cyan-500/20 shrink-0">
+                        <div className="w-1.5 h-1.5 rounded-full bg-cyan-300" />
+                      </div>
+                    </div>
+
+                    {/* Right Cards Stack */}
+                    <div className="flex-1 min-w-0 space-y-3.5">
+                      {/* Top Card: Rental Start */}
+                      <div className="p-3.5 bg-slate-950/75 hover:bg-slate-950/90 rounded-xl border border-slate-800/90 hover:border-slate-700/80 transition-colors shadow-inner space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-cyan-400">
+                            <Clock className="w-3.5 h-3.5" />
+                            <MapPin className="w-3.5 h-3.5" />
+                          </div>
+                          {pickupHub && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-[10px] font-mono font-bold text-cyan-300">
+                              <Compass className="w-2.5 h-2.5" />
+                              Garage Hub
+                            </span>
+                          )}
+                        </div>
+
+                        <div>
+                          <span className="text-white font-extrabold text-sm block tracking-tight leading-tight">
+                            START LOCATION • {startDisplayTitle}
+                          </span>
+                          <span className="text-slate-400 text-xs font-medium block mt-1">
+                            {formatDateOnly(startDateTime)}, {formatTimeOnly(startDateTime)}
+                          </span>
+                          {pickupHub && (
+                            <span className="text-slate-400 text-[11px] block mt-1 leading-relaxed">
+                              {activeBooking.startLocation}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Navigation Buttons for Hub - Equal 50/50 Columns in 1 Row */}
+                        {pickupHub && (
+                          <div className="pt-2.5 border-t border-slate-800/80 grid grid-cols-2 gap-2 w-full">
+                            <a
+                              href={pickupHub.googleMapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/30 hover:border-emerald-500/60 text-xs font-semibold text-emerald-300 transition-all shadow-xs text-center group"
+                            >
+                              <svg className="w-3.5 h-3.5 fill-emerald-400 shrink-0" viewBox="0 0 24 24">
+                                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                              </svg>
+                              <span>Google Maps</span>
+                              <ExternalLink className="w-3 h-3 text-emerald-400/60 group-hover:text-emerald-300 transition-colors" />
+                            </a>
+
+                            <a
+                              href={pickupHub.appleMapsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-sky-500/30 hover:border-sky-500/60 text-xs font-semibold text-sky-300 transition-all shadow-xs text-center group"
+                            >
+                              <Compass className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                              <span>Apple Maps</span>
+                              <ExternalLink className="w-3 h-3 text-sky-400/60 group-hover:text-sky-300 transition-colors" />
+                            </a>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Bottom Card: Return */}
+                      <div className="p-3.5 bg-slate-950/75 hover:bg-slate-950/90 rounded-xl border border-slate-800/90 hover:border-slate-700/80 transition-colors shadow-inner space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-cyan-400">
+                          <Calendar className="w-3.5 h-3.5" />
+                          <Flag className="w-3.5 h-3.5" />
+                        </div>
+
+                        <div>
+                          <span className="text-white font-extrabold text-sm block tracking-tight leading-tight">
+                            RETURN • {activeBooking.destination}
+                          </span>
+                          <span className="text-slate-400 text-xs font-medium block mt-1">
+                            {formatDateOnly(timeCalc.endDateTime)}, {formatTimeOnly(timeCalc.endDateTime)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Route Navigation Link Footer */}
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-center">
+                    <a
+                      href={routeDirectionsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors py-1 px-3 rounded-lg hover:bg-cyan-500/10"
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>View full route on Google Maps</span>
+                      <ExternalLink className="w-3 h-3 opacity-60 ml-0.5" />
+                    </a>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Vehicle & Renter Verification Card */}
@@ -637,7 +757,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
               </h3>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
                 activeBooking.selfDrive
-                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                  ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
                   : 'bg-blue-500/10 text-blue-300 border-blue-500/30'
               }`}>
                 {activeBooking.selfDrive ? 'Self-Drive Rental' : 'With Chauffeur'}
@@ -721,6 +841,29 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
                   )}
                 </div>
               )}
+
+              {/* Rental Contract & Agreement Notice */}
+              <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80 space-y-2">
+                <div className="flex items-center">
+                  <span className="text-slate-400 text-[10px] uppercase font-mono flex items-center gap-1">
+                    <FileCheck className="w-3.5 h-3.5 text-cyan-400" />
+                    Rental Contract Agreement
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  We encourage you to review the agreement beforehand. This document will need to be signed upon turnover of the vehicle.
+                </p>
+                <a
+                  href="https://storage.googleapis.com/miranda-rentals-public/Miranda_Rentals_Agreement_Form_Placeholder.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 border border-cyan-500/30 text-xs font-semibold text-cyan-300 transition-colors shadow-xs active:scale-98"
+                >
+                  <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Read Agreement Contract (PDF)</span>
+                  <ExternalLink className="w-3 h-3 opacity-60 ml-0.5" />
+                </a>
+              </div>
             </div>
           </div>
 
@@ -728,7 +871,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
           {activeBooking.notes && activeBooking.notes.trim() && (
             <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg space-y-2.5">
               <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5">
-                <FileText className="w-4 h-4 text-amber-400" />
+                <FileText className="w-4 h-4 text-cyan-400" />
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
                   Rental Notes & Special Instructions
                 </h3>

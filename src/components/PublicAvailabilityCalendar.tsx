@@ -568,18 +568,18 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
         {/* Range Conflict Alert Banner */}
         {rangeWarning && (
-          <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-amber-900 shadow-xs animate-fade-in">
+          <div className="p-4 bg-sky-50 border border-sky-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-sky-900 shadow-xs animate-fade-in">
             <div className="flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <AlertTriangle className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
               <div>
-                <strong className="font-bold text-amber-950">Invalid Date Selection: </strong>
+                <strong className="font-bold text-sky-950">Invalid Date Selection: </strong>
                 <span>{rangeWarning}</span>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setRangeWarning(null)}
-              className="text-amber-600 hover:text-amber-900 p-0.5 rounded-md hover:bg-amber-100/60 transition-colors"
+              className="text-sky-600 hover:text-sky-900 p-0.5 rounded-md hover:bg-sky-100/60 transition-colors"
             >
               <XCircle className="w-4 h-4" />
             </button>
@@ -588,14 +588,14 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
         {/* Drop-off Turnover Pickup Time Restriction Notice */}
         {selectedStartDate && getDayAvailability(selectedStartDate).isReturnDay && (
-          <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-amber-900 shadow-xs animate-fade-in">
+          <div className="p-4 bg-sky-50 border border-sky-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-sky-900 shadow-xs animate-fade-in">
             <div className="flex items-start gap-2.5">
-              <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <Clock className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
               <div>
-                <strong className="font-bold text-amber-950">Drop-off Turnover Schedule Notice: </strong>
+                <strong className="font-bold text-sky-950">Drop-off Turnover Schedule Notice: </strong>
                 <span>
                   {formatFullDate(selectedStartDate)} is a vehicle drop-off date (Drop-off at {getDayAvailability(selectedStartDate).returnTime || 'scheduled time'}). You can only book from{' '}
-                  <strong className="font-bold text-amber-950">{getDayAvailability(selectedStartDate).readyTime || 'afternoon'} onwards</strong>{' '}
+                  <strong className="font-bold text-sky-950">{getDayAvailability(selectedStartDate).readyTime || 'afternoon'} onwards</strong>{' '}
                   (allows 4-hour cleaning and sanitation turnover after vehicle return).
                 </span>
               </div>
@@ -605,14 +605,14 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
         {/* Pick-up Turnover Return Time Restriction Notice */}
         {selectedEndDate && getDayAvailability(selectedEndDate).isStartDay && (
-          <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-amber-900 shadow-xs animate-fade-in">
+          <div className="p-4 bg-sky-50 border border-sky-300 rounded-2xl flex items-start justify-between gap-3 text-xs text-sky-900 shadow-xs animate-fade-in">
             <div className="flex items-start gap-2.5">
-              <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <Clock className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
               <div>
-                <strong className="font-bold text-amber-950">Pick-up Turnover Schedule Notice: </strong>
+                <strong className="font-bold text-sky-950">Pick-up Turnover Schedule Notice: </strong>
                 <span>
                   {formatFullDate(selectedEndDate)} is an outgoing pick-up date (Pick-up at {getDayAvailability(selectedEndDate).departureTime || 'scheduled time'}). You must return the vehicle by{' '}
-                  <strong className="font-bold text-amber-950">{getDayAvailability(selectedEndDate).latestReturnTime || 'morning'}</strong>{' '}
+                  <strong className="font-bold text-sky-950">{getDayAvailability(selectedEndDate).latestReturnTime || 'morning'}</strong>{' '}
                   (allows 4-hour cleaning and sanitation turnover before next pick-up).
                 </span>
               </div>
@@ -795,7 +795,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
         {/* SECTION 2: Guidelines & Policies */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100">
-            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
               <ShieldAlert className="w-4 h-4" />
             </div>
             <div>
@@ -810,7 +810,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {/* Guide 1: ₱300 Booking Deposit (Clean & Expandable) */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col justify-between">
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col justify-between h-full">
               <div>
                 <div className="flex items-center justify-between gap-1.5 mb-1.5">
                   <div className="flex items-center gap-2 text-slate-900 text-xs font-bold">
@@ -853,9 +853,9 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
 
             {/* Guide 2: Fuel Policy */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col h-full">
               <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
-                <Fuel className="w-4 h-4 text-amber-600 shrink-0" />
+                <Fuel className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Fuel Policy</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
@@ -864,7 +864,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
 
             {/* Guide 3: Damage Accountability */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col h-full">
               <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>Damage Accountability</span>
@@ -875,7 +875,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
 
             {/* Guide 4: OR/CR & RFID */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col h-full">
               <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <Radio className="w-4 h-4 text-indigo-600 shrink-0" />
                 <span>OR/CR & RFID Security Responsibility</span>
@@ -886,7 +886,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
 
             {/* Guide 5: 22-Hour Rental Window & 4-Hour Cleaning Turnover */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col h-full">
               <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <Clock className="w-4 h-4 text-blue-600 shrink-0" />
                 <span>22-Hour Daily Rental & Cleaning Window</span>
@@ -897,7 +897,7 @@ export const PublicAvailabilityCalendar: React.FC<PublicAvailabilityCalendarProp
             </div>
 
             {/* Guide 6: Limitation of Liability */}
-            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 md:col-span-2 lg:col-span-3">
+            <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 flex flex-col h-full">
               <div className="flex items-center gap-2 text-slate-900 text-xs font-bold mb-1.5">
                 <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
                 <span>Limitation of Liability & Accident Waiver</span>

@@ -130,8 +130,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span className="xs:hidden">Synced</span>
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-1 sm:px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200" title="Offline Mode Active: Changes are saved to your device cache and will sync once reconnected">
-                      <CloudOff className="w-2.5 h-2.5 text-amber-600" />
+                    <span className="inline-flex items-center gap-1 px-1 sm:px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-semibold bg-sky-50 text-sky-800 border border-sky-200" title="Offline Mode Active: Changes are saved to your device cache and will sync once reconnected">
+                      <CloudOff className="w-2.5 h-2.5 text-sky-600" />
                       <span>Offline</span>
                     </span>
                   )}
@@ -276,7 +276,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         }}
                         className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-slate-700 hover:text-slate-900"
                       >
-                        <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
+                        <KeyRound className="w-4 h-4 text-blue-600 shrink-0" />
                         <div>
                           <span className="font-semibold block">Change Admin PIN</span>
                           <span className="text-[10px] text-slate-400">Update 4-digit access code</span>

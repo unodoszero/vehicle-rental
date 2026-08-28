@@ -52,7 +52,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               toast.type === 'success'
                 ? 'bg-slate-900 text-white border-slate-700 shadow-slate-950/20'
                 : toast.type === 'warning'
-                ? 'bg-amber-950/95 text-amber-100 border-amber-800 shadow-amber-950/20'
+                ? 'bg-slate-900 text-white border-sky-600/40 shadow-slate-950/20'
                 : toast.type === 'error'
                 ? 'bg-red-950/95 text-red-100 border-red-800 shadow-red-950/20'
                 : 'bg-slate-900 text-white border-slate-700 shadow-slate-950/20'
@@ -60,7 +60,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           >
             <div className="mt-0.5 shrink-0">
               {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-              {toast.type === 'warning' && <AlertTriangle className="w-4 h-4 text-amber-400" />}
+              {toast.type === 'warning' && <AlertTriangle className="w-4 h-4 text-sky-400" />}
               {toast.type === 'error' && <AlertTriangle className="w-4 h-4 text-red-400" />}
               {toast.type === 'info' && <Info className="w-4 h-4 text-blue-400" />}
             </div>
