@@ -2,12 +2,154 @@ import { Booking, BookingTimeCalculation, DateConflict, VehicleType } from '../t
 
 /**
  * Standard policy rules:
- * - 2 hours deducted from standard 24h day cycles (e.g. 1 day = 22h, 2 days = 46h)
- *   to ensure a vehicle turnaround, cleaning, and maintenance buffer before next reservation.
- * - 4 hours turnaround window after return before vehicle is ready for next customer.
+ * - Flexible booking support: customer/admin can book any duration (e.g. 10 hours, 12 hours, 18 hours, 24 hours, multi-day).
+ * - 3 hours mandatory turnaround & cleaning buffer between bookings on the same vehicle.
  */
-export const RENTAL_DEDUCTION_HOURS = 2;
-export const TURNOVER_CLEANING_HOURS = 4;
+export const TURNOVER_CLEANING_HOURS = 3;
+
+/**
+ * Standard Rates Configuration:
+ * - 12 Hours: ₱1,000
+ * - 18 Hours: ₱1,300
+ * - 24 Hours: ₱1,500
+ */
+export const RENTAL_RATES = {
+  HOURS_12: 1000,
+  HOURS_18: 1300,
+  HOURS_24: 1500,
+} as const;
+
+/**
+ * Standard Mandatory Deposit:
+ * - ₱300 security deposit required to lock in calendar & secure vehicle booking.
+ * - Deducted from overall rental fee on live tracker / final settlement.
+ */
+export const STANDARD_DEPOSIT_AMOUNT = 300;
+
+export interface PaymentBreakdown {
+  totalFee: number;
+  depositDeduction: number;
+  isDepositPaid: boolean;
+  remainingBalance: number;
+  isPaidInFull: boolean;
+  formattedTotal: string;
+  formattedDeposit: string;
+  formattedBalance: string;
+}
+
+/**
+ * Calculates complete payment breakdown: total rental fee, ₱300 deposit deduction, and remaining balance
+ */
+export function computeBookingPaymentBreakdown(booking?: {
+  paymentAmount?: number | string;
+  durationHours?: number;
+  depositPaid?: boolean;
+  depositAmount?: number | string;
+  downpaymentAmount?: number | string;
+  paymentStatus?: 'pending' | 'paid' | 'partial';
+}): PaymentBreakdown {
+  if (!booking) {
+    return {
+      totalFee: 0,
+      depositDeduction: 0,
+      isDepositPaid: false,
+      remainingBalance: 0,
+      isPaidInFull: false,
+      formattedTotal: '₱0',
+      formattedDeposit: '₱0',
+      formattedBalance: '₱0',
+    };
+  }
+
+  const rawTotal = typeof booking.paymentAmount === 'number'
+    ? booking.paymentAmount
+    : typeof booking.paymentAmount === 'string'
+    ? parseFloat(booking.paymentAmount.replace(/[^0-9.]/g, '')) || 0
+    : 0;
+
+  const totalFee = rawTotal > 0 ? rawTotal : (booking.durationHours ? getSuggestedRate(booking.durationHours) : 0);
+
+  // Deposit is considered paid if depositPaid is true OR (if not explicitly false) booking has status 'paid'/'partial' or downpayment
+  const isDepositPaid = booking.depositPaid !== false && (
+    booking.depositPaid === true ||
+    booking.paymentStatus === 'paid' ||
+    booking.paymentStatus === 'partial' ||
+    (typeof booking.downpaymentAmount === 'number' && booking.downpaymentAmount > 0) ||
+    (typeof booking.downpaymentAmount === 'string' && parseFloat(booking.downpaymentAmount.replace(/[^0-9.]/g, '')) > 0)
+  );
+
+  const customDownpayment = typeof booking.downpaymentAmount === 'number'
+    ? booking.downpaymentAmount
+    : typeof booking.downpaymentAmount === 'string'
+    ? parseFloat(booking.downpaymentAmount.replace(/[^0-9.]/g, '')) || 0
+    : typeof booking.depositAmount === 'number'
+    ? booking.depositAmount
+    : typeof booking.depositAmount === 'string'
+    ? parseFloat(booking.depositAmount.replace(/[^0-9.]/g, '')) || 0
+    : 0;
+
+  const depositDeduction = isDepositPaid
+    ? (customDownpayment > 0 ? customDownpayment : STANDARD_DEPOSIT_AMOUNT)
+    : 0;
+
+  const isPaidInFull = booking.paymentStatus === 'paid';
+  const remainingBalance = isPaidInFull ? 0 : Math.max(0, totalFee - depositDeduction);
+
+  return {
+    totalFee,
+    depositDeduction,
+    isDepositPaid,
+    remainingBalance,
+    isPaidInFull,
+    formattedTotal: `₱${totalFee.toLocaleString()}`,
+    formattedDeposit: `₱${depositDeduction.toLocaleString()}`,
+    formattedBalance: `₱${remainingBalance.toLocaleString()}`,
+  };
+}
+
+/**
+ * Computes suggested rental fee based on duration hours
+ */
+export function getSuggestedRate(durationHours: number): number {
+  if (!durationHours || durationHours <= 0) return 0;
+  if (durationHours <= 12) return RENTAL_RATES.HOURS_12;
+  if (durationHours <= 18) return RENTAL_RATES.HOURS_18;
+  if (durationHours <= 24) return RENTAL_RATES.HOURS_24;
+  
+  // For rentals > 24 hours: full 24-hour cycles (₱1,500/day) + partial hours tier
+  const fullDays = Math.floor(durationHours / 24);
+  const remainingHours = durationHours % 24;
+
+  if (remainingHours === 0) {
+    return fullDays * RENTAL_RATES.HOURS_24;
+  } else if (remainingHours <= 12) {
+    return (fullDays * RENTAL_RATES.HOURS_24) + RENTAL_RATES.HOURS_12;
+  } else if (remainingHours <= 18) {
+    return (fullDays * RENTAL_RATES.HOURS_24) + RENTAL_RATES.HOURS_18;
+  } else {
+    return (fullDays + 1) * RENTAL_RATES.HOURS_24;
+  }
+}
+
+/**
+ * Formats duration in hours to a human-friendly string (e.g. "10 Hours", "12 Hours", "24 Hours (1 Day)", "48 Hours (2 Days)")
+ */
+export function formatDurationDisplay(durationHours: number): string {
+  if (!durationHours || durationHours <= 0) return '0 Hours';
+  
+  if (durationHours < 24) {
+    const formatted = Number.isInteger(durationHours) ? durationHours : durationHours.toFixed(1);
+    return `${formatted} Hour${durationHours === 1 ? '' : 's'}`;
+  }
+
+  const days = durationHours / 24;
+  if (Number.isInteger(days)) {
+    return `${durationHours} Hours (${days} Day${days === 1 ? '' : 's'})`;
+  }
+
+  const formattedHours = Number.isInteger(durationHours) ? durationHours : durationHours.toFixed(1);
+  return `${formattedHours} Hours (${days.toFixed(1)} Days)`;
+}
 
 /**
  * Accurately parses a booking's date and time into a Date object
@@ -19,22 +161,60 @@ export function getBookingStartDateTime(booking: Pick<Booking, 'startDate' | 'st
 }
 
 /**
- * Computes the scheduled end Date by deducting 2 hours from full 24-hour cycles:
- * ((noOfDays * 24) - 2) hours.
- * E.g., 1 Day = 22 hours, 2 Days = 46 hours.
+ * Computes the scheduled end Date from:
+ * 1. Explicit endDate and endTime if present
+ * 2. durationHours if present (start + durationHours)
+ * 3. Legacy noOfDays (start + noOfDays * 24h)
  */
-export function getBookingEndDateTime(booking: Pick<Booking, 'startDate' | 'startTime' | 'noOfDays'>): Date {
+export function getBookingEndDateTime(
+  booking: Pick<Booking, 'startDate' | 'startTime'> & Partial<Pick<Booking, 'endDate' | 'endTime' | 'durationHours' | 'noOfDays'>>
+): Date {
   const start = getBookingStartDateTime(booking);
-  const durationHours = Math.max(1, (booking.noOfDays * 24) - RENTAL_DEDUCTION_HOURS);
-  const durationMs = durationHours * 60 * 60 * 1000;
+
+  // Case 1: Explicit end date and end time
+  if (booking.endDate && booking.endTime) {
+    const [y, m, d] = booking.endDate.split('-').map(Number);
+    const [h, min] = booking.endTime.split(':').map(Number);
+    const end = new Date(y, m - 1, d, h, min, 0, 0);
+    if (!isNaN(end.getTime()) && end.getTime() > start.getTime()) {
+      return end;
+    }
+  }
+
+  // Case 2: Explicit durationHours
+  if (booking.durationHours && booking.durationHours > 0) {
+    const durationMs = booking.durationHours * 60 * 60 * 1000;
+    return new Date(start.getTime() + durationMs);
+  }
+
+  // Case 3: Days-based fallback
+  const days = (typeof booking.noOfDays === 'number' && booking.noOfDays > 0) ? booking.noOfDays : 1;
+  const durationMs = days * 24 * 60 * 60 * 1000;
   return new Date(start.getTime() + durationMs);
 }
 
 /**
- * Computes the turnaround/cleaning ready Date (4 hours after scheduled return).
+ * Computes duration in hours between start and end Date
+ */
+export function getBookingDurationHours(
+  booking: Pick<Booking, 'startDate' | 'startTime'> & Partial<Pick<Booking, 'endDate' | 'endTime' | 'durationHours' | 'noOfDays'>>
+): number {
+  if (booking.durationHours && booking.durationHours > 0) {
+    return booking.durationHours;
+  }
+  const start = getBookingStartDateTime(booking).getTime();
+  const end = getBookingEndDateTime(booking).getTime();
+  const diffHours = (end - start) / (1000 * 60 * 60);
+  return Math.round(diffHours * 10) / 10;
+}
+
+/**
+ * Computes the turnaround/cleaning ready Date (3 hours after scheduled return).
  * The vehicle is ready for the next customer starting from this timestamp.
  */
-export function getBookingTurnaroundReadyDateTime(booking: Pick<Booking, 'startDate' | 'startTime' | 'noOfDays'>): Date {
+export function getBookingTurnaroundReadyDateTime(
+  booking: Pick<Booking, 'startDate' | 'startTime'> & Partial<Pick<Booking, 'endDate' | 'endTime' | 'durationHours' | 'noOfDays'>>
+): Date {
   const end = getBookingEndDateTime(booking);
   return new Date(end.getTime() + (TURNOVER_CLEANING_HOURS * 60 * 60 * 1000));
 }
@@ -43,24 +223,58 @@ export function getBookingTurnaroundReadyDateTime(booking: Pick<Booking, 'startD
  * Calculates current live time metrics, countdown, and overtime
  */
 export function calculateBookingTime(
-  booking: Pick<Booking, 'startDate' | 'startTime' | 'noOfDays'>,
+  booking: Pick<Booking, 'startDate' | 'startTime'> & Partial<Pick<Booking, 'endDate' | 'endTime' | 'durationHours' | 'noOfDays' | 'status' | 'completedAt' | 'turnoverDetails'>>,
   currentDate: Date = new Date()
 ): BookingTimeCalculation {
   const startDateTime = getBookingStartDateTime(booking);
   const endDateTime = getBookingEndDateTime(booking);
+  const turnaroundReadyDateTime = getBookingTurnaroundReadyDateTime(booking);
+  const durationHours = getBookingDurationHours(booking);
+  const formattedDuration = formatDurationDisplay(durationHours);
+
   const now = currentDate.getTime();
   const startMs = startDateTime.getTime();
   const endMs = endDateTime.getTime();
-  const totalDurationMs = endMs - startMs;
+  const totalDurationMs = Math.max(1, endMs - startMs);
+
+  const isCompleted = booking.status === 'completed' || Boolean(booking.completedAt);
+  const hoursSinceTurnover = booking.completedAt 
+    ? Math.max(0, (now - new Date(booking.completedAt).getTime()) / (1000 * 3600)) 
+    : (isCompleted ? 999 : undefined);
+  const canUndoTurnover = isCompleted && hoursSinceTurnover !== undefined && hoursSinceTurnover <= 24;
+
+  if (isCompleted) {
+    return {
+      startDateTime,
+      endDateTime,
+      turnaroundReadyDateTime,
+      durationHours,
+      formattedDuration,
+      isUpcoming: false,
+      isActive: false,
+      isOvertime: false,
+      isCompleted: true,
+      completedAt: booking.completedAt,
+      turnoverDetails: booking.turnoverDetails,
+      canUndoTurnover,
+      hoursSinceTurnover,
+      totalDurationMs,
+      elapsedMs: totalDurationMs,
+      remainingMs: 0,
+      progressPercentage: 100,
+      daysRemaining: 0,
+      hoursRemaining: 0,
+      minutesRemaining: 0,
+      secondsRemaining: 0,
+      formattedRemaining: 'Completed',
+    };
+  }
 
   const isUpcoming = now < startMs;
   const isOvertime = now > endMs;
   const isActive = now >= startMs && now <= endMs;
-  const isCompleted = false; // Admin can mark or if archived
 
   const elapsedMs = isUpcoming ? 0 : Math.max(0, now - startMs);
-  // For upcoming bookings, remaining time counts down to start of departure (startMs - now).
-  // For active or overtime bookings, remaining time counts down to scheduled return (endMs - now).
   const remainingMs = isUpcoming ? startMs - now : endMs - now;
 
   const progressPercentage = isUpcoming
@@ -81,10 +295,14 @@ export function calculateBookingTime(
   return {
     startDateTime,
     endDateTime,
+    turnaroundReadyDateTime,
+    durationHours,
+    formattedDuration,
     isUpcoming,
     isActive,
     isOvertime,
-    isCompleted,
+    isCompleted: false,
+    canUndoTurnover: false,
     totalDurationMs,
     elapsedMs,
     remainingMs,
@@ -197,38 +415,82 @@ export function formatDateTime(dateInput: Date | string | null | undefined): str
 
 /**
  * Detects whether a proposed booking conflicts with existing bookings.
- * Overlap exists if proposedStart < existingEnd AND proposedEnd > existingStart.
- * If sameVehicleOnly is true, only checks bookings of the same vehicle type.
+ * 1. Direct overlap: proposedStart < existingEnd AND proposedEnd > existingStart
+ * 2. Buffer overlap (3-hour cleaning turnover): 
+ *    - Proposed booking starts within 3 hours of existing return (vehicle still being cleaned)
+ *    - Proposed booking ends within 3 hours before existing departure (not enough time to clean before next rental)
  */
 export function checkBookingConflicts(
-  proposed: Pick<Booking, 'id' | 'startDate' | 'startTime' | 'noOfDays' | 'vehicle'>,
+  proposed: Pick<Booking, 'startDate' | 'startTime' | 'vehicle'> & Partial<Pick<Booking, 'id' | 'endDate' | 'endTime' | 'durationHours' | 'noOfDays'>>,
   allBookings: Booking[],
-  sameVehicleOnly: boolean = true
+  sameVehicleOnly: boolean = true,
+  enforceCleaningBuffer: boolean = true
 ): DateConflict {
   const proposedStart = getBookingStartDateTime(proposed).getTime();
   const proposedEnd = getBookingEndDateTime(proposed).getTime();
+  const bufferMs = (TURNOVER_CLEANING_HOURS * 60 * 60 * 1000);
 
-  const conflictingBookings = allBookings.filter((existing) => {
+  const directCollisions: Booking[] = [];
+  const bufferCollisions: Booking[] = [];
+  let conflictReason: string | undefined;
+
+  for (const existing of allBookings) {
     // Skip self when editing
     if (proposed.id && existing.id === proposed.id) {
-      return false;
+      continue;
+    }
+
+    // Skip cancelled bookings
+    if (existing.status === 'cancelled') {
+      continue;
     }
 
     // Vehicle check if enabled
     if (sameVehicleOnly && existing.vehicle !== proposed.vehicle) {
-      return false;
+      continue;
     }
 
-    const existingStart = getBookingStartDateTime(existing).getTime();
-    const existingEnd = getBookingEndDateTime(existing).getTime();
+    const existingStartDate = getBookingStartDateTime(existing);
+    const existingEndDate = getBookingEndDateTime(existing);
+    const existingStart = existingStartDate.getTime();
+    const existingEnd = existingEndDate.getTime();
 
-    // Standard interval overlap: [A_start, A_end] and [B_start, B_end]
-    return proposedStart < existingEnd && proposedEnd > existingStart;
-  });
+    // 1. Direct overlap check
+    if (proposedStart < existingEnd && proposedEnd > existingStart) {
+      directCollisions.push(existing);
+      conflictReason = `Direct schedule conflict: Overlaps with ${existing.name}'s booking (${formatDateTime(existingStartDate)} – ${formatDateTime(existingEndDate)}).`;
+      continue;
+    }
+
+    // 2. Turnover cleaning buffer check (3 hours)
+    if (enforceCleaningBuffer) {
+      // Case A: Proposed booking is after existing, but starts before 3-hour cleaning window finishes
+      const existingCleanReady = existingEnd + bufferMs;
+      if (proposedStart >= existingEnd && proposedStart < existingCleanReady) {
+        bufferCollisions.push(existing);
+        const readyDate = new Date(existingCleanReady);
+        conflictReason = `Turnover buffer conflict: ${existing.name}'s rental ends at ${formatTimeOnly(existingEndDate)}. The 3-hour vehicle cleaning window completes at ${formatTimeOnly(readyDate)}. Earliest available pick-up is ${formatTimeOnly(readyDate)}.`;
+        continue;
+      }
+
+      // Case B: Proposed booking is before existing, but ends after 3-hour buffer window before next pickup
+      const existingCleanStart = existingStart - bufferMs;
+      if (proposedEnd <= existingStart && proposedEnd > existingCleanStart) {
+        bufferCollisions.push(existing);
+        const cutoffDate = new Date(existingCleanStart);
+        conflictReason = `Turnover buffer conflict: Next booking (${existing.name}) starts at ${formatTimeOnly(existingStartDate)}. Due to the 3-hour cleaning window, this rental must be returned by ${formatTimeOnly(cutoffDate)}.`;
+        continue;
+      }
+    }
+  }
+
+  const allConflicting = [...directCollisions, ...bufferCollisions];
 
   return {
-    hasConflict: conflictingBookings.length > 0,
-    conflictingBookings,
+    hasConflict: allConflicting.length > 0,
+    isBufferConflict: directCollisions.length === 0 && bufferCollisions.length > 0,
+    conflictingBookings: allConflicting,
+    reason: conflictReason,
   };
 }
 

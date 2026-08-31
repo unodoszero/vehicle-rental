@@ -11,6 +11,7 @@ import { db } from '../firebase';
 import { Booking } from '../types';
 import { calculateBookingTime, formatDateTime, formatDateOnly, formatTimeOnly, getBookingStartDateTime } from '../utils/dateUtils';
 import { loadBookings } from '../utils/storage';
+import { PaymentPanel } from './PaymentPanel';
 
 // Preset garage pickup hubs with map coordinates / navigation deep-links
 export const PICKUP_HUBS = [
@@ -355,9 +356,10 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
 
   const timeCalc = calculateBookingTime(activeBooking, currentTime);
   const startDateTime = getBookingStartDateTime(activeBooking);
-  const isOvertime = timeCalc.isOvertime;
-  const isUpcoming = timeCalc.isUpcoming;
-  const isActive = timeCalc.isActive;
+  const isCompleted = timeCalc.isCompleted;
+  const isOvertime = !isCompleted && timeCalc.isOvertime;
+  const isUpcoming = !isCompleted && timeCalc.isUpcoming;
+  const isActive = !isCompleted && timeCalc.isActive;
 
   // Extract license number & expiration safely
   const licenseNum = activeBooking.licenseNumber || (activeBooking.driversLicenseDetails ? activeBooking.driversLicenseDetails.split(/,\s*(?:Exp:?\s*|Expiration:?\s*)?/i)[0] : '');
@@ -367,7 +369,9 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
     <div
       id="renter-tracker-page"
       className={`min-h-screen transition-colors duration-500 flex flex-col justify-between selection:bg-blue-600 selection:text-white ${
-        isOvertime
+        isCompleted
+          ? 'bg-slate-950 text-emerald-50'
+          : isOvertime
           ? 'bg-slate-950 text-red-50'
           : 'bg-slate-950 text-slate-100'
       }`}
@@ -375,7 +379,9 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
       {/* Top Renter Branding Header */}
       <header
         className={`px-3.5 sm:px-8 py-3 border-b sticky top-0 z-30 transition-colors duration-500 backdrop-blur-md ${
-          isOvertime
+          isCompleted
+            ? 'bg-emerald-950/80 border-emerald-900/60'
+            : isOvertime
             ? 'bg-red-950/90 border-red-900/80'
             : 'bg-slate-950/90 border-slate-800/80'
         }`}
@@ -384,19 +390,25 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
           <div className="flex items-center gap-2.5 min-w-0">
             <div
               className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shadow-lg shrink-0 transition-transform ${
-                isOvertime
+                isCompleted
+                  ? 'bg-emerald-600 text-white shadow-emerald-600/30'
+                  : isOvertime
                   ? 'bg-red-600 text-white animate-pulse'
                   : 'bg-gradient-to-tr from-blue-700 to-sky-500 text-white shadow-blue-600/30'
               }`}
             >
-              <Car className="w-4 h-4 sm:w-5 sm:h-5" />
+              {isCompleted ? (
+                <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5" />
+              ) : (
+                <Car className="w-4 h-4 sm:w-5 sm:h-5" />
+              )}
             </div>
             <div className="min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 block leading-tight truncate">
+              <span className={`text-[10px] font-bold uppercase tracking-wider block leading-tight truncate ${isCompleted ? 'text-emerald-400' : 'text-blue-400'}`}>
                 Miranda Rentals & Services
               </span>
               <h1 className="text-xs sm:text-sm font-bold text-white tracking-tight leading-tight truncate">
-                Live Rental Time Tracker
+                {isCompleted ? 'Turnover Completed' : 'Live Rental Time Tracker'}
               </h1>
             </div>
           </div>
@@ -412,7 +424,11 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
               </button>
             )}
 
-            <span className="px-2 py-1 bg-slate-900 text-slate-200 border border-slate-800 rounded-lg text-xs font-mono font-bold whitespace-nowrap shadow-xs">
+            <span className={`px-2 py-1 border rounded-lg text-xs font-mono font-bold whitespace-nowrap shadow-xs ${
+              isCompleted 
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80' 
+                : 'bg-slate-900 text-slate-200 border-slate-800'
+            }`}>
               {activeBooking.id}
             </span>
 
@@ -445,7 +461,9 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
         <div
           id="tracker-status-banner"
           className={`p-4 sm:p-5 rounded-2xl border transition-all duration-500 shadow-xl ${
-            isOvertime
+            isCompleted
+              ? 'bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 text-emerald-100 border-emerald-600/60 shadow-emerald-950/50'
+              : isOvertime
               ? 'bg-gradient-to-r from-red-950 via-red-900 to-red-950 text-white border-red-600 shadow-red-950/60 ring-1 ring-red-500/40'
               : isActive
               ? 'bg-gradient-to-r from-slate-900 via-slate-900/90 to-blue-950/60 text-slate-100 border-slate-800 shadow-black/60'
@@ -455,14 +473,18 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
           <div className="flex items-center gap-3.5">
             <div
               className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-md ${
-                isOvertime
+                isCompleted
+                  ? 'bg-emerald-500 text-slate-950 font-bold'
+                  : isOvertime
                   ? 'bg-red-500 text-white font-bold animate-bounce'
                   : isActive
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
               }`}
             >
-              {isOvertime ? (
+              {isCompleted ? (
+                <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
+              ) : isOvertime ? (
                 <AlertOctagon className="w-5 h-5" />
               ) : isActive ? (
                 <Clock className="w-5 h-5" />
@@ -473,10 +495,12 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
 
             <div>
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider block opacity-75">
-                {isOvertime ? 'Urgent Alert' : 'Status'}
+                {isCompleted ? 'Turnover Logged' : isOvertime ? 'Urgent Alert' : 'Status'}
               </span>
               <h2 className="text-sm sm:text-base font-bold tracking-tight leading-snug">
-                {isOvertime
+                {isCompleted
+                  ? 'Successful Turnover • Rental Period Completed'
+                  : isOvertime
                   ? 'Rental Time Limit Exceeded'
                   : isActive
                   ? 'Active Rental — Timer Running'
@@ -486,124 +510,203 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
           </div>
         </div>
 
-        {/* Hero Countdown Timer Display */}
-        <div
-          id="tracker-timer-container"
-          className={`p-6 sm:p-8 rounded-2xl border transition-all duration-500 flex flex-col items-center text-center shadow-2xl relative overflow-hidden ${
-            isOvertime
-              ? 'bg-gradient-to-b from-red-950/90 to-slate-950 border-red-700/80 shadow-red-950/60 ring-1 ring-red-500/30'
-              : 'bg-gradient-to-b from-slate-900/90 to-slate-950 border-slate-800/90 shadow-black/80'
-          }`}
-        >
-          {/* Subtle Ambient Glow */}
+        {/* Hero Section: Completed Gratitude Showcase OR Live Countdown Display */}
+        {isCompleted ? (
           <div
-            className={`absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-20 ${
-              isOvertime ? 'bg-red-500' : 'bg-blue-600'
-            }`}
-          />
+            id="tracker-completed-showcase"
+            className="p-6 sm:p-8 rounded-2xl border border-emerald-600/40 bg-gradient-to-b from-slate-900/95 via-emerald-950/30 to-slate-950 text-center shadow-2xl relative overflow-hidden space-y-6"
+          >
+            {/* Ambient Emerald Glow */}
+            <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full blur-3xl pointer-events-none bg-emerald-500/15" />
 
-          <span className="text-[10px] sm:text-[11px] font-mono uppercase tracking-widest text-slate-400 mb-2 relative z-10 font-bold">
-            {isOvertime
-              ? 'Overtime Elapsed'
-              : isUpcoming
-              ? 'Time Until Trip Starts'
-              : 'Time Remaining on Rental'}
-          </span>
-
-          {/* Time digits grid (Mobile-Optimized Single-Tap Clarity) */}
-          <div className="grid grid-cols-4 gap-2 sm:gap-4 my-3 max-w-xl w-full relative z-10 font-mono">
-            {/* Days */}
-            <div
-              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
-                isOvertime
-                  ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
-                  : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
-              }`}
-            >
-              <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
-                {String(timeCalc.daysRemaining).padStart(2, '0')}
-              </span>
-              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
-                Days
-              </span>
-            </div>
-
-            {/* Hours */}
-            <div
-              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
-                isOvertime
-                  ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
-                  : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
-              }`}
-            >
-              <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
-                {String(timeCalc.hoursRemaining).padStart(2, '0')}
-              </span>
-              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
-                Hours
-              </span>
-            </div>
-
-            {/* Minutes */}
-            <div
-              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
-                isOvertime
-                  ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
-                  : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
-              }`}
-            >
-              <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
-                {String(timeCalc.minutesRemaining).padStart(2, '0')}
-              </span>
-              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
-                Mins
-              </span>
-            </div>
-
-            {/* Seconds */}
-            <div
-              className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
-                isOvertime
-                  ? 'bg-red-950/90 border-red-700 text-red-200 shadow-md'
-                  : 'bg-slate-900/90 border-slate-800 text-blue-400 shadow-md'
-              }`}
-            >
-              <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter animate-pulse">
-                {String(timeCalc.secondsRemaining).padStart(2, '0')}
-              </span>
-              <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
-                Secs
-              </span>
-            </div>
-          </div>
-
-          {/* Progress Bar & Scheduled Window */}
-          <div className="w-full max-w-xl mt-3 relative z-10 space-y-2">
-            <div className="flex justify-between items-center text-[10px] sm:text-xs text-slate-300 font-mono">
-              <div className="flex items-center gap-1 min-w-0">
-                <span className="text-slate-500 uppercase font-sans font-bold text-[9px] sm:text-[10px] tracking-wider shrink-0">Start:</span>
-                <span className="text-slate-200 font-semibold truncate">{formatDateOnly(startDateTime)} • {formatTimeOnly(startDateTime)}</span>
+            <div className="relative z-10 max-w-lg mx-auto space-y-3">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/10 border-2 border-emerald-400/50 flex items-center justify-center mx-auto text-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.35)]">
+                <Sparkles className="w-8 h-8 text-emerald-300 animate-pulse" />
               </div>
-              <div className="flex items-center gap-1 min-w-0 text-right justify-end">
-                <span className="text-slate-500 uppercase font-sans font-bold text-[9px] sm:text-[10px] tracking-wider shrink-0">Return:</span>
-                <span className="text-slate-200 font-semibold truncate">{formatDateOnly(timeCalc.endDateTime)} • {formatTimeOnly(timeCalc.endDateTime)}</span>
+
+              <div className="space-y-1">
+                <span className="text-[11px] font-mono font-bold uppercase tracking-widest text-emerald-400 block">
+                  Rental Finished • Vehicle Checked In
+                </span>
+                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                  Thank You for Choosing Miranda Rentals!
+                </h3>
               </div>
-            </div>
-            <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden p-0.5 border border-slate-700">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  isOvertime ? 'bg-red-500 animate-pulse' : 'bg-gradient-to-r from-blue-500 to-sky-400'
-                }`}
-                style={{ width: `${Math.min(100, timeCalc.progressPercentage)}%` }}
-              />
-            </div>
-            {isOvertime && (
-              <p className="text-xs text-red-300 font-semibold text-center pt-1">
-                Vehicle return was scheduled for {formatDateOnly(timeCalc.endDateTime)} at {formatTimeOnly(timeCalc.endDateTime)}.
+
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                We sincerely appreciate your prompt turnover of the vehicle. We hope you had a safe and enjoyable journey with our fleet!
               </p>
+            </div>
+
+            {/* Turnover Inspection & Verification Breakdown */}
+            <div className="relative z-10 max-w-xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-left font-mono">
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-500 uppercase block">Returned At</span>
+                <span className="text-xs font-bold text-white block mt-0.5 truncate">
+                  {activeBooking.turnoverDetails?.returnedAt 
+                    ? formatDateTime(new Date(activeBooking.turnoverDetails.returnedAt)) 
+                    : activeBooking.completedAt 
+                    ? formatDateTime(new Date(activeBooking.completedAt))
+                    : 'Turnover Verified'}
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-500 uppercase block">Fuel Status</span>
+                <span className="text-xs font-bold text-emerald-300 block mt-0.5 truncate">
+                  {activeBooking.turnoverDetails?.fuelLevel || 'Verified OK'}
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-500 uppercase block">Odometer</span>
+                <span className="text-xs font-bold text-sky-300 block mt-0.5 truncate">
+                  {activeBooking.turnoverDetails?.odometerReading || 'Checked'}
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-500 uppercase block">Handled By</span>
+                <span className="text-xs font-bold text-slate-200 block mt-0.5 truncate">
+                  {activeBooking.turnoverDetails?.receivedBy || 'Miranda Rentals'}
+                </span>
+              </div>
+            </div>
+
+            {activeBooking.turnoverDetails?.conditionNotes && (
+              <div className="relative z-10 max-w-xl mx-auto p-3 bg-slate-950/70 rounded-xl border border-emerald-900/40 text-left">
+                <span className="text-[10px] font-mono text-emerald-400 uppercase font-bold block mb-1">
+                  Turnover Inspection Notes
+                </span>
+                <p className="text-xs text-slate-300 italic">
+                  &ldquo;{activeBooking.turnoverDetails.conditionNotes}&rdquo;
+                </p>
+              </div>
             )}
           </div>
-        </div>
+        ) : (
+          /* Hero Countdown Timer Display */
+          <div
+            id="tracker-timer-container"
+            className={`p-6 sm:p-8 rounded-2xl border transition-all duration-500 flex flex-col items-center text-center shadow-2xl relative overflow-hidden ${
+              isOvertime
+                ? 'bg-gradient-to-b from-red-950/90 to-slate-950 border-red-700/80 shadow-red-950/60 ring-1 ring-red-500/30'
+                : 'bg-gradient-to-b from-slate-900/90 to-slate-950 border-slate-800/90 shadow-black/80'
+            }`}
+          >
+            {/* Subtle Ambient Glow */}
+            <div
+              className={`absolute -top-24 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-20 ${
+                isOvertime ? 'bg-red-500' : 'bg-blue-600'
+              }`}
+            />
+
+            <span className="text-[10px] sm:text-[11px] font-mono uppercase tracking-widest text-slate-400 mb-2 relative z-10 font-bold">
+              {isOvertime
+                ? 'Overtime Elapsed'
+                : isUpcoming
+                ? 'Time Until Trip Starts'
+                : 'Time Remaining on Rental'}
+            </span>
+
+            {/* Time digits grid */}
+            <div className="grid grid-cols-4 gap-2 sm:gap-4 my-3 max-w-xl w-full relative z-10 font-mono">
+              {/* Days */}
+              <div
+                className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
+                  isOvertime
+                    ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
+                    : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
+                }`}
+              >
+                <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
+                  {String(timeCalc.daysRemaining).padStart(2, '0')}
+                </span>
+                <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+                  Days
+                </span>
+              </div>
+
+              {/* Hours */}
+              <div
+                className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
+                  isOvertime
+                    ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
+                    : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
+                }`}
+              >
+                <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
+                  {String(timeCalc.hoursRemaining).padStart(2, '0')}
+                </span>
+                <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+                  Hours
+                </span>
+              </div>
+
+              {/* Minutes */}
+              <div
+                className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
+                  isOvertime
+                    ? 'bg-red-950/90 border-red-700 text-red-100 shadow-md'
+                    : 'bg-slate-900/90 border-slate-800 text-white shadow-md'
+                }`}
+              >
+                <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter">
+                  {String(timeCalc.minutesRemaining).padStart(2, '0')}
+                </span>
+                <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+                  Mins
+                </span>
+              </div>
+
+              {/* Seconds */}
+              <div
+                className={`p-3 sm:p-5 rounded-2xl border flex flex-col items-center transition-transform hover:scale-102 ${
+                  isOvertime
+                    ? 'bg-red-950/90 border-red-700 text-red-200 shadow-md'
+                    : 'bg-slate-900/90 border-slate-800 text-blue-400 shadow-md'
+                }`}
+              >
+                <span className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tighter animate-pulse">
+                  {String(timeCalc.secondsRemaining).padStart(2, '0')}
+                </span>
+                <span className="text-[9px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+                  Secs
+                </span>
+              </div>
+            </div>
+
+            {/* Progress Bar & Scheduled Window */}
+            <div className="w-full max-w-xl mt-3 relative z-10 space-y-2">
+              <div className="flex justify-between items-center text-[10px] sm:text-xs text-slate-300 font-mono">
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="text-slate-500 uppercase font-sans font-bold text-[9px] sm:text-[10px] tracking-wider shrink-0">Start:</span>
+                  <span className="text-slate-200 font-semibold truncate">{formatDateOnly(startDateTime)} • {formatTimeOnly(startDateTime)}</span>
+                </div>
+                <div className="flex items-center gap-1 min-w-0 text-right justify-end">
+                  <span className="text-slate-500 uppercase font-sans font-bold text-[9px] sm:text-[10px] tracking-wider shrink-0">Return:</span>
+                  <span className="text-slate-200 font-semibold truncate">{formatDateOnly(timeCalc.endDateTime)} • {formatTimeOnly(timeCalc.endDateTime)}</span>
+                </div>
+              </div>
+              <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    isOvertime ? 'bg-red-500 animate-pulse' : 'bg-gradient-to-r from-blue-500 to-sky-400'
+                  }`}
+                  style={{ width: `${Math.min(100, timeCalc.progressPercentage)}%` }}
+                />
+              </div>
+              {isOvertime && (
+                <p className="text-xs text-red-300 font-semibold text-center pt-1">
+                  Vehicle return was scheduled for {formatDateOnly(timeCalc.endDateTime)} at {formatTimeOnly(timeCalc.endDateTime)}.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Dedicated Payment & Settlement Panel */}
+        <PaymentPanel booking={activeBooking} />
 
         {/* Organized Booking Details Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -616,7 +719,7 @@ export const RenterTrackerView: React.FC<RenterTrackerViewProps> = ({
                 Trip Itinerary & Hubs
               </h3>
               <span className="text-[11px] font-mono font-bold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 px-2.5 py-0.5 rounded-lg shadow-xs">
-                {activeBooking.noOfDays} DAY{activeBooking.noOfDays > 1 ? 'S' : ''}
+                {activeBooking.durationHours ? `${activeBooking.durationHours} HOUR${activeBooking.durationHours > 1 ? 'S' : ''}` : `${activeBooking.noOfDays} DAY${activeBooking.noOfDays > 1 ? 'S' : ''}`}
               </span>
             </div>
 

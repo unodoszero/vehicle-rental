@@ -11,7 +11,7 @@ import { AdminLockScreen } from './components/AdminLockScreen';
 import { PublicAvailabilityCalendar } from './components/PublicAvailabilityCalendar';
 import { ChangePinModal } from './components/ChangePinModal';
 import { ToastProvider, useToast } from './components/Toast';
-import { Booking, VehicleType } from './types';
+import { Booking, VehicleType, TurnoverDetails } from './types';
 import { loadBookings, isAdminSessionActive, setAdminSessionActive } from './utils/storage';
 import { 
   subscribeToBookings, 
@@ -19,7 +19,7 @@ import {
   deleteBookingFromFirestore, 
   clearAllBookingsFromFirestore 
 } from './utils/firebaseBookings';
-import { checkBookingConflicts } from './utils/dateUtils';
+import { checkBookingConflicts, calculateBookingTime } from './utils/dateUtils';
 
 type AppRoute = 'public' | 'admin' | 'tracker';
 
@@ -95,7 +95,7 @@ function MainApp() {
 
   // Filters
   const [vehicleFilter, setVehicleFilter] = useState<'all' | VehicleType>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'upcoming' | 'overtime'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'ongoing' | 'active' | 'upcoming' | 'overtime' | 'completed'>('all');
 
   // URL Route State
   const [currentRoute, setCurrentRoute] = useState<AppRoute>(() => parseRouteFromLocation().route);
@@ -119,6 +119,40 @@ function MainApp() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Automatic completion check for 1-day inactive overdue rentals
+  useEffect(() => {
+    if (!bookings || bookings.length === 0) return;
+    const now = new Date();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+
+    bookings.forEach((b) => {
+      if (b.status === 'completed' || b.completedAt) return;
+      const timeCalc = calculateBookingTime(b, now);
+      if (timeCalc.isOvertime) {
+        const overtimeDuration = now.getTime() - timeCalc.endDateTime.getTime();
+        if (overtimeDuration >= oneDayMs) {
+          // Automatically log completely in the completed status after 1 day of inactive update
+          const autoCompleted: Booking = {
+            ...b,
+            status: 'completed',
+            completedAt: now.toISOString(),
+            turnoverDetails: {
+              returnedAt: timeCalc.endDateTime.toISOString(),
+              fuelLevel: 'Full',
+              odometerReading: 'Auto-closed after 24h grace period',
+              conditionNotes: 'Auto-completed by system after 1 day of inactive schedule past return time.',
+              receivedBy: 'System Automation',
+              loggedAt: now.toISOString(),
+            },
+          };
+          saveBookingToFirestore(autoCompleted).catch((e) => {
+            console.warn('Failed auto-completing overdue booking', b.id, e);
+          });
+        }
+      }
+    });
+  }, [bookings]);
 
   // Listen to browser forward/backward buttons (popstate)
   useEffect(() => {
@@ -262,6 +296,86 @@ function MainApp() {
     setIsDrawerOpen(true);
   };
 
+  // Log successful vehicle turnover
+  const handleLogTurnover = async (bookingId: string, details: TurnoverDetails) => {
+    const target = bookings.find((b) => b.id === bookingId);
+    if (!target) return;
+
+    const updatedBooking: Booking = {
+      ...target,
+      status: 'completed',
+      completedAt: details.returnedAt || new Date().toISOString(),
+      turnoverDetails: details,
+    };
+
+    try {
+      await saveBookingToFirestore(updatedBooking);
+      if (selectedBooking && selectedBooking.id === bookingId) {
+        setSelectedBooking(updatedBooking);
+      }
+      showToast(
+        'Turnover Successfully Logged',
+        `Reservation ${bookingId} for ${target.name} is now marked as Completed. Vehicle is safely checked in.`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Failed to save turnover to Firestore', err);
+      showToast('Database Error', 'Could not save turnover details to cloud.', 'error');
+    }
+  };
+
+  // Undo vehicle turnover (restore to active/scheduled)
+  const handleUndoTurnover = async (booking: Booking) => {
+    const updatedBooking: Booking = {
+      ...booking,
+      status: undefined,
+      completedAt: undefined,
+      turnoverDetails: undefined,
+    };
+
+    try {
+      await saveBookingToFirestore(updatedBooking);
+      if (selectedBooking && selectedBooking.id === booking.id) {
+        setSelectedBooking(updatedBooking);
+      }
+      showToast(
+        'Turnover Reverted',
+        `Reservation ${booking.id} has been restored to the ongoing schedule.`,
+        'info'
+      );
+    } catch (err) {
+      console.error('Failed to revert turnover in Firestore', err);
+      showToast('Database Error', 'Could not revert turnover in cloud.', 'error');
+    }
+  };
+
+  // Update payment status and billing details
+  const handleUpdatePaymentStatus = async (bookingId: string, paymentData: Partial<Booking>) => {
+    const target = bookings.find((b) => b.id === bookingId);
+    if (!target) return;
+
+    const updated: Booking = {
+      ...target,
+      ...paymentData,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await saveBookingToFirestore(updated);
+      if (selectedBooking && selectedBooking.id === bookingId) {
+        setSelectedBooking(updated);
+      }
+      showToast(
+        paymentData.paymentStatus === 'paid' ? 'Payment Confirmed' : 'Payment Status Updated',
+        `Payment for ${target.name} has been set to ${(paymentData.paymentStatus || 'updated').toUpperCase()}.`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Failed to update payment status in Firestore', err);
+      showToast('Database Error', 'Could not update payment status in cloud.', 'error');
+    }
+  };
+
   // 1. ROUTE: /tracker - Live Renter Tracker View
   if (currentRoute === 'tracker') {
     const activeBooking = activeTrackerId 
@@ -350,9 +464,9 @@ function MainApp() {
         <StatsBar
           bookings={bookings}
           activeFilter={statusFilter}
-          onFilterOvertime={() => setStatusFilter(statusFilter === 'overtime' ? 'all' : 'overtime')}
-          onFilterActive={() => setStatusFilter(statusFilter === 'active' ? 'all' : 'active')}
+          onFilterOngoing={() => setStatusFilter(statusFilter === 'ongoing' ? 'all' : 'ongoing')}
           onFilterUpcoming={() => setStatusFilter(statusFilter === 'upcoming' ? 'all' : 'upcoming')}
+          onFilterCompleted={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')}
         />
 
         {/* Monthly Calendar View */}
@@ -375,6 +489,9 @@ function MainApp() {
         onEdit={handleOpenEditModal}
         onDelete={handleOpenDeleteModal}
         onOpenTracker={handleOpenTracker}
+        onConfirmTurnover={handleLogTurnover}
+        onUndoTurnover={handleUndoTurnover}
+        onUpdatePaymentStatus={handleUpdatePaymentStatus}
       />
 
       {/* Add / Edit Booking Form Modal */}

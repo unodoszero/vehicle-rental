@@ -2,17 +2,24 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, Calendar, Clock, MapPin, Phone, User, Users, Car, 
   ShieldCheck, FileText, AlertCircle, Info, Sparkles, Hash, AlertTriangle,
-  Building2, Edit3, ToggleLeft, ToggleRight
+  Building2, Edit3, ToggleLeft, ToggleRight, CreditCard, DollarSign,
+  Zap, Check, ArrowRight
 } from 'lucide-react';
 import { Booking, VehicleType } from '../types';
 import { generateBookingId, getRandomColorTag, generateTrackingToken } from '../utils/storage';
 import { 
   getBookingStartDateTime, 
   getBookingEndDateTime, 
+  getBookingTurnaroundReadyDateTime,
   formatDateTime, 
   formatDateOnly,
+  formatTimeOnly,
   toISODateString,
-  checkBookingConflicts
+  checkBookingConflicts,
+  getSuggestedRate,
+  formatDurationDisplay,
+  TURNOVER_CLEANING_HOURS,
+  RENTAL_RATES
 } from '../utils/dateUtils';
 
 export const PRESET_PICKUP_LOCATIONS = [
@@ -52,13 +59,40 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
   const [isPickupPreset, setIsPickupPreset] = useState(true);
   const [startLocation, setStartLocation] = useState(PRESET_PICKUP_LOCATIONS[0]);
   const [destination, setDestination] = useState('');
+  
+  // Flexible Timing & Schedule state
   const [startDate, setStartDate] = useState('');
-  const [startTime, setStartTime] = useState('09:00');
-  const [noOfDays, setNoOfDays] = useState<number | string>(1);
+  const [startTime, setStartTime] = useState('08:00');
+  const [endDate, setEndDate] = useState('');
+  const [endTime, setEndTime] = useState('20:00');
+  const [durationHours, setDurationHours] = useState<number>(12);
+  const [bookingMode, setBookingMode] = useState<'preset' | 'custom'>('preset');
+
   const [notes, setNotes] = useState('');
   const [colorTag, setColorTag] = useState('indigo');
 
+  // Payment Form Fields
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'partial'>('partial');
+  const [depositPaid, setDepositPaid] = useState<boolean>(true);
+  const [paymentAmount, setPaymentAmount] = useState<string>('');
+  const [downpaymentAmount, setDownpaymentAmount] = useState<string>('300');
+  const [paymentMethod, setPaymentMethod] = useState<string>('GCash');
+  const [paymentReference, setPaymentReference] = useState<string>('');
+
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Helper to sync end date/time given start and hours
+  const calculateEndFromDuration = (sDate: string, sTime: string, hours: number) => {
+    if (!sDate || !sTime || hours <= 0) return { endDate: sDate, endTime: sTime };
+    const [y, m, d] = sDate.split('-').map(Number);
+    const [h, min] = sTime.split(':').map(Number);
+    const start = new Date(y, m - 1, d, h, min, 0, 0);
+    const end = new Date(start.getTime() + (hours * 60 * 60 * 1000));
+    return {
+      endDate: toISODateString(end),
+      endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
+    };
+  };
 
   useEffect(() => {
     if (editingBooking) {
@@ -72,12 +106,10 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setDriverName(editingBooking.driverName || '');
       setDriverBirthdate(editingBooking.driverBirthdate || '');
 
-      // Handle split license fields or backward compatibility from driversLicenseDetails
       if (editingBooking.licenseNumber || editingBooking.licenseExpiration) {
         setLicenseNumber(editingBooking.licenseNumber || '');
         setLicenseExpiration(editingBooking.licenseExpiration || '');
       } else if (editingBooking.driversLicenseDetails) {
-        // Attempt to parse existing combined strings like "DL-8893021, Exp: 01/01/2030"
         const parts = editingBooking.driversLicenseDetails.split(/,\s*(?:Exp:?\s*|Expiration:?\s*)?/i);
         setLicenseNumber(parts[0] || editingBooking.driversLicenseDetails);
         setLicenseExpiration(parts[1] || '');
@@ -99,12 +131,57 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       }
       setDestination(editingBooking.destination);
       setStartDate(editingBooking.startDate);
-      setStartTime(editingBooking.startTime);
-      setNoOfDays(editingBooking.noOfDays);
+      setStartTime(editingBooking.startTime || '08:00');
+
+      // Handle duration & end date/time
+      const sDate = editingBooking.startDate;
+      const sTime = editingBooking.startTime || '08:00';
+      if (editingBooking.endDate && editingBooking.endTime) {
+        setEndDate(editingBooking.endDate);
+        setEndTime(editingBooking.endTime);
+        const [sy, sm, sd] = sDate.split('-').map(Number);
+        const [sh, smin] = sTime.split(':').map(Number);
+        const [ey, em, ed] = editingBooking.endDate.split('-').map(Number);
+        const [eh, emin] = editingBooking.endTime.split(':').map(Number);
+        const startDt = new Date(sy, sm - 1, sd, sh, smin, 0, 0);
+        const endDt = new Date(ey, em - 1, ed, eh, emin, 0, 0);
+        const calculatedHours = Math.max(1, Math.round(((endDt.getTime() - startDt.getTime()) / (1000 * 3600)) * 10) / 10);
+        setDurationHours(calculatedHours);
+        setBookingMode('custom');
+      } else if (editingBooking.durationHours) {
+        setDurationHours(editingBooking.durationHours);
+        const { endDate: calculatedEndD, endTime: calculatedEndT } = calculateEndFromDuration(sDate, sTime, editingBooking.durationHours);
+        setEndDate(calculatedEndD);
+        setEndTime(calculatedEndT);
+        setBookingMode('preset');
+      } else {
+        const days = editingBooking.noOfDays || 1;
+        const hours = days * 24;
+        setDurationHours(hours);
+        const { endDate: calculatedEndD, endTime: calculatedEndT } = calculateEndFromDuration(sDate, sTime, hours);
+        setEndDate(calculatedEndD);
+        setEndTime(calculatedEndT);
+        setBookingMode('preset');
+      }
+
       setNotes(editingBooking.notes || '');
       setColorTag(editingBooking.colorTag || 'indigo');
+
+      // Payment details
+      const isDepPaid = editingBooking.depositPaid !== false && (
+        editingBooking.depositPaid === true ||
+        editingBooking.paymentStatus === 'paid' ||
+        editingBooking.paymentStatus === 'partial' ||
+        Boolean(editingBooking.downpaymentAmount)
+      );
+      setDepositPaid(isDepPaid);
+      setPaymentStatus(editingBooking.paymentStatus || (isDepPaid ? 'partial' : 'pending'));
+      setPaymentAmount(editingBooking.paymentAmount ? String(editingBooking.paymentAmount).replace(/[^0-9.]/g, '') : '');
+      setDownpaymentAmount(editingBooking.downpaymentAmount ? String(editingBooking.downpaymentAmount).replace(/[^0-9.]/g, '') : (isDepPaid ? '300' : ''));
+      setPaymentMethod(editingBooking.paymentMethod || 'GCash');
+      setPaymentReference(editingBooking.paymentReference || '');
     } else {
-      // Default reset
+      // Default reset for new booking
       const today = new Date();
       const defaultDateStr = initialDate || toISODateString(today);
       setName('');
@@ -123,13 +200,113 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       setStartLocation(PRESET_PICKUP_LOCATIONS[0]);
       setDestination('');
       setStartDate(defaultDateStr);
-      setStartTime('09:00');
-      setNoOfDays(1);
+      setStartTime('08:00');
+
+      // Default 12 hours preset (₱1,000)
+      const defaultHours = 12;
+      setDurationHours(defaultHours);
+      const { endDate: calculatedEndD, endTime: calculatedEndT } = calculateEndFromDuration(defaultDateStr, '08:00', defaultHours);
+      setEndDate(calculatedEndD);
+      setEndTime(calculatedEndT);
+      setBookingMode('preset');
+
       setNotes('');
       setColorTag(getRandomColorTag());
+
+      // Payment default: Customer pays ₱300 deposit to secure booking
+      setDepositPaid(true);
+      setPaymentStatus('partial');
+      setPaymentAmount(String(getSuggestedRate(defaultHours)));
+      setDownpaymentAmount('300');
+      setPaymentMethod('GCash');
+      setPaymentReference('');
     }
     setErrors({});
   }, [editingBooking, initialDate, isOpen]);
+
+  // Handle deposit toggle in booking form
+  const handleToggleDepositPaid = (checked: boolean) => {
+    setDepositPaid(checked);
+    if (checked) {
+      if (!downpaymentAmount || downpaymentAmount === '0' || downpaymentAmount === '') {
+        setDownpaymentAmount('300');
+      }
+      if (paymentStatus === 'pending') {
+        setPaymentStatus('partial');
+      }
+    } else {
+      if (paymentStatus === 'partial') {
+        setPaymentStatus('pending');
+      }
+      setDownpaymentAmount('');
+    }
+  };
+
+  // Handle Preset Button Clicks
+  const handleSelectPresetHours = (hours: number) => {
+    setDurationHours(hours);
+    setBookingMode('preset');
+    const { endDate: calculatedEndD, endTime: calculatedEndT } = calculateEndFromDuration(startDate, startTime, hours);
+    setEndDate(calculatedEndD);
+    setEndTime(calculatedEndT);
+
+    // Auto-suggest payment amount if currently empty or if it was matched to a standard rate
+    const suggested = getSuggestedRate(hours);
+    if (!paymentAmount || paymentAmount === '1000' || paymentAmount === '1300' || paymentAmount === '1500' || paymentAmount === '3000' || paymentAmount === '4500') {
+      setPaymentAmount(String(suggested));
+    }
+  };
+
+  // When Start Date or Start Time changes, update End Date/Time if in preset mode
+  const handleStartDateChange = (newDate: string) => {
+    setStartDate(newDate);
+    if (bookingMode === 'preset' || !endDate) {
+      const { endDate: calculatedEndD, endTime: calculatedEndT } = calculateEndFromDuration(newDate, startTime, durationHours);
+      setEndDate(calculatedEndD);
+      setEndTime(calculatedEndT);
+    }
+  };
+
+  const handleStartTimeChange = (newTime: string) => {
+    setStartTime(newTime);
+    if (bookingMode === 'preset' || !endTime) {
+      const { endDate: calculatedEndD, endTime: calculatedEndT } = calculateEndFromDuration(startDate, newTime, durationHours);
+      setEndDate(calculatedEndD);
+      setEndTime(calculatedEndT);
+    }
+  };
+
+  // When Custom End Date or Time changes
+  const handleEndDateChange = (newEndDate: string) => {
+    setEndDate(newEndDate);
+    setBookingMode('custom');
+    recalculateDuration(startDate, startTime, newEndDate, endTime);
+  };
+
+  const handleEndTimeChange = (newEndTime: string) => {
+    setEndTime(newEndTime);
+    setBookingMode('custom');
+    recalculateDuration(startDate, startTime, endDate, newEndTime);
+  };
+
+  const recalculateDuration = (sD: string, sT: string, eD: string, eT: string) => {
+    if (!sD || !sT || !eD || !eT) return;
+    try {
+      const [sy, sm, sd] = sD.split('-').map(Number);
+      const [sh, smin] = sT.split(':').map(Number);
+      const [ey, em, ed] = eD.split('-').map(Number);
+      const [eh, emin] = eT.split(':').map(Number);
+      const startDt = new Date(sy, sm - 1, sd, sh, smin, 0, 0);
+      const endDt = new Date(ey, em - 1, ed, eh, emin, 0, 0);
+      const diffMs = endDt.getTime() - startDt.getTime();
+      if (diffMs > 0) {
+        const hours = Math.round((diffMs / (1000 * 3600)) * 10) / 10;
+        setDurationHours(hours);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   // When vehicle changes to Van, strictly force selfDrive = false and update default model
   const handleVehicleChange = (newVehicle: VehicleType) => {
@@ -156,10 +333,24 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     if (!destination.trim()) errs.destination = 'Destination is required';
     if (!startDate) errs.startDate = 'Start date is required';
     if (!startTime) errs.startTime = 'Start time is required';
-    
-    const parsedDays = Number(noOfDays);
-    if (!noOfDays || isNaN(parsedDays) || parsedDays < 1) {
-      errs.noOfDays = 'Minimum duration is 1 day';
+    if (!endDate) errs.endDate = 'End date is required';
+    if (!endTime) errs.endTime = 'End time is required';
+
+    // Validate end is after start
+    if (startDate && startTime && endDate && endTime) {
+      const [sy, sm, sd] = startDate.split('-').map(Number);
+      const [sh, smin] = startTime.split(':').map(Number);
+      const [ey, em, ed] = endDate.split('-').map(Number);
+      const [eh, emin] = endTime.split(':').map(Number);
+      const startDt = new Date(sy, sm - 1, sd, sh, smin, 0, 0);
+      const endDt = new Date(ey, em - 1, ed, eh, emin, 0, 0);
+      if (endDt.getTime() <= startDt.getTime()) {
+        errs.endTime = 'End date and time must be after start date and time';
+      }
+    }
+
+    if (durationHours <= 0) {
+      errs.durationHours = 'Rental duration must be at least 1 hour';
     }
 
     const parsedPax = Number(passengers);
@@ -196,6 +387,17 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       ? `${licenseNumber.trim()}${licenseExpiration.trim() ? `, Exp: ${licenseExpiration.trim()}` : ''}`
       : undefined;
 
+    const parsedPaymentAmount = paymentAmount ? parseFloat(paymentAmount) || paymentAmount : undefined;
+    const parsedDownpayment = depositPaid
+      ? (downpaymentAmount ? parseFloat(downpaymentAmount) || 300 : 300)
+      : undefined;
+
+    const totalNum = typeof parsedPaymentAmount === 'number' ? parsedPaymentAmount : parseFloat(String(parsedPaymentAmount || '0')) || 0;
+    const depositNum = typeof parsedDownpayment === 'number' ? parsedDownpayment : 0;
+    const calcRemaining = paymentStatus === 'paid' ? 0 : Math.max(0, totalNum - depositNum);
+
+    const calculatedDays = Math.max(1, Math.ceil(durationHours / 24));
+
     const bookingData: Booking = {
       id: editingBooking ? editingBooking.id : generateBookingId(),
       name: name.trim(),
@@ -215,9 +417,21 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       destination: destination.trim(),
       startDate,
       startTime,
-      noOfDays: Number(noOfDays),
+      endDate,
+      endTime,
+      durationHours,
+      noOfDays: calculatedDays,
       notes: notes.trim() || undefined,
       colorTag,
+      depositPaid,
+      depositAmount: 300,
+      paymentStatus,
+      paymentAmount: parsedPaymentAmount,
+      downpaymentAmount: parsedDownpayment,
+      remainingBalance: calcRemaining,
+      paymentMethod,
+      paymentReference: paymentReference.trim() || undefined,
+      paidAt: paymentStatus === 'paid' ? (editingBooking?.paidAt || new Date().toISOString()) : undefined,
       trackingToken: editingBooking?.trackingToken || generateTrackingToken(),
       createdAt: editingBooking ? editingBooking.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -226,39 +440,28 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
     onSubmit(bookingData);
   };
 
-  // Real-time calculated end preview, turnover ready time, & conflict check
-  let calculatedEndPreview = '';
-  let turnaroundReadyPreview = '';
-  const numDays = Number(noOfDays);
-  const totalRentalHours = !isNaN(numDays) && numDays >= 1 ? (numDays * 24) - 2 : 0;
-
-  if (startDate && startTime && !isNaN(numDays) && numDays >= 1) {
-    try {
-      const endDt = getBookingEndDateTime({ startDate, startTime, noOfDays: numDays });
-      calculatedEndPreview = formatDateTime(endDt);
-      const readyDt = new Date(endDt.getTime() + 4 * 60 * 60 * 1000);
-      turnaroundReadyPreview = formatDateTime(readyDt);
-    } catch {
-      calculatedEndPreview = '';
-      turnaroundReadyPreview = '';
-    }
-  }
+  // Real-time calculated suggested rate & conflicts
+  const calculatedSuggestedRate = useMemo(() => {
+    return getSuggestedRate(durationHours);
+  }, [durationHours]);
 
   const activeConflict = useMemo(() => {
-    const validNumDays = Number(noOfDays);
-    if (!allBookings || allBookings.length === 0 || !startDate || !startTime || isNaN(validNumDays) || validNumDays < 1) return null;
+    if (!allBookings || allBookings.length === 0 || !startDate || !startTime || !endDate || !endTime) return null;
     return checkBookingConflicts(
       {
         id: editingBooking?.id,
         startDate,
         startTime,
-        noOfDays: validNumDays,
+        endDate,
+        endTime,
+        durationHours,
         vehicle,
       },
       allBookings,
+      true,
       true
     );
-  }, [allBookings, startDate, startTime, noOfDays, vehicle, editingBooking?.id]);
+  }, [allBookings, startDate, startTime, endDate, endTime, durationHours, vehicle, editingBooking?.id]);
 
   if (!isOpen) return null;
 
@@ -278,25 +481,26 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
           <div className="flex items-center space-x-2">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
             <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                {editingBooking ? 'Modify Booking Details' : 'Create Vehicle Booking'}
+              <h2 className="text-base font-bold text-slate-900 leading-none">
+                {editingBooking ? 'Edit Booking' : 'New Vehicle Booking'}
               </h2>
-              <p className="text-[11px] text-slate-500">
-                {editingBooking ? `Editing booking #${editingBooking.id}` : 'Fleet operations schedule & dispatch'}
+              <p className="text-xs text-slate-500 mt-1">
+                Flexible duration scheduling with mandatory {TURNOVER_CLEANING_HOURS}-hour cleaning buffer
               </p>
             </div>
           </div>
           <button
-            id="close-booking-form-btn"
+            id="close-booking-form-modal-btn"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+            className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            aria-label="Close dialog"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+        {/* Modal Form */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
           {/* Section: Customer Information */}
           <div>
             <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
@@ -304,557 +508,664 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
               1. Customer Information
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="min-w-0">
+              <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Customer Full Name <span className="text-red-500">*</span>
+                  Full Name <span className="text-red-500">*</span>
                 </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    id="booking-name-input"
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Juan Dela Cruz"
-                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
-                      errors.name ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
-                    }`}
-                  />
-                </div>
+                <input
+                  id="booking-name-input"
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Juan Dela Cruz"
+                  className={`w-full px-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium ${
+                    errors.name ? 'border-red-400' : 'border-slate-200'
+                  }`}
+                />
                 {errors.name && <p className="text-[11px] text-red-600 mt-1">{errors.name}</p>}
               </div>
 
-              <div className="min-w-0">
+              <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Mobile Number <span className="text-red-500">*</span>
                 </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    id="booking-mobile-input"
-                    type="tel"
-                    required
-                    value={mobileNo}
-                    onChange={(e) => setMobileNo(e.target.value)}
-                    placeholder="09123456789"
-                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
-                      errors.mobileNo ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
-                    }`}
-                  />
-                </div>
+                <input
+                  id="booking-mobile-input"
+                  type="tel"
+                  required
+                  value={mobileNo}
+                  onChange={(e) => setMobileNo(e.target.value)}
+                  placeholder="0917-XXX-XXXX"
+                  className={`w-full px-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
+                    errors.mobileNo ? 'border-red-400' : 'border-slate-200'
+                  }`}
+                />
                 {errors.mobileNo && <p className="text-[11px] text-red-600 mt-1">{errors.mobileNo}</p>}
               </div>
             </div>
           </div>
 
-          {/* Section: Vehicle & Driver Configuration */}
+          {/* Section: Vehicle & Rental Mode */}
           <div className="pt-2 border-t border-slate-100">
             <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
               <Car className="w-3.5 h-3.5 text-slate-400" />
-              2. Vehicle & Chauffeur Settings
+              2. Vehicle & Drive Mode
             </label>
-
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Vehicle Type Dropdown */}
-              <div className="min-w-0">
+              <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Vehicle Type <span className="text-red-500">*</span>
+                  Vehicle Type
                 </label>
-                <select
-                  id="booking-vehicle-select"
-                  value={vehicle}
-                  onChange={(e) => handleVehicleChange(e.target.value as VehicleType)}
-                  className="w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
-                >
-                  <option value="Car">Car (Self-Drive Allowed)</option>
-                  <option value="Van">Van (Chauffeur Only)</option>
-                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['Car', 'Van'] as VehicleType[]).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => handleVehicleChange(v)}
+                      className={`px-3 py-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-1.5 transition-all ${
+                        vehicle === v
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Car className="w-3.5 h-3.5" />
+                      {v === 'Car' ? 'Car (Sedan)' : 'Van (Hiace)'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Uneditable Model field with label 'Model' */}
-              <div className="min-w-0">
+              <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Model
+                  Plate Number
                 </label>
                 <input
-                  id="booking-model-input"
                   type="text"
-                  readOnly
-                  disabled
-                  value={vehicle === 'Car' ? 'Toyota Vios' : 'Toyota Hiace Commuter Van'}
-                  className="w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-100/90 border border-slate-200 rounded-lg text-slate-700 font-semibold cursor-not-allowed select-none"
+                  value={plateNumber}
+                  onChange={(e) => setPlateNumber(e.target.value)}
+                  placeholder="e.g. NBF 1234"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono uppercase"
                 />
               </div>
 
-              {/* Passenger Count */}
-              <div className="min-w-0">
+              <div>
                 <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                   Passengers <span className="text-red-500">*</span>
                 </label>
-                <div className="relative">
-                  <Users className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    id="booking-passengers-input"
-                    type="number"
-                    min="1"
-                    max={vehicle === 'Car' ? 7 : 18}
-                    required
-                    value={passengers}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === '') {
-                        setPassengers('');
-                      } else {
-                        const parsed = parseInt(val, 10);
-                        setPassengers(isNaN(parsed) ? '' : parsed);
-                      }
-                    }}
-                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
-                      errors.passengers ? 'border-red-400' : 'border-slate-200'
-                    }`}
-                  />
-                </div>
-                {errors.passengers && <p className="text-[11px] text-red-600 mt-1">{errors.passengers}</p>}
+                <input
+                  type="number"
+                  min="1"
+                  max={vehicle === 'Car' ? 7 : 18}
+                  value={passengers}
+                  onChange={(e) => setPassengers(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
               </div>
             </div>
 
-            {/* Self-Drive / Driver Rule Section */}
-            <div className="mt-3">
-              {vehicle === 'Car' ? (
-                <div className="p-3.5 bg-blue-50/50 rounded-lg border border-blue-100">
-                  <div className="flex items-center justify-between">
+            {/* Self Drive vs With Driver */}
+            {vehicle === 'Car' ? (
+              <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs font-bold text-slate-800">Self-Drive Rental Option</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelfDrive(!selfDrive)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all ${
+                      selfDrive ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {selfDrive ? 'Self-Drive (Client Driving)' : 'With Company Driver'}
+                  </button>
+                </div>
+
+                {selfDrive && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
                     <div>
-                      <span className="text-xs font-bold text-slate-900">Self-Drive Rental</span>
-                      <p className="text-[11px] text-slate-500">
-                        Check if the customer will drive the vehicle themselves.
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
+                      <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                        Driver's License # <span className="text-red-500">*</span>
+                      </label>
                       <input
-                        id="booking-selfdrive-toggle"
-                        type="checkbox"
-                        checked={selfDrive}
-                        onChange={(e) => setSelfDrive(e.target.checked)}
-                        className="sr-only peer"
+                        type="text"
+                        value={licenseNumber}
+                        onChange={(e) => setLicenseNumber(e.target.value)}
+                        placeholder="e.g. DL-12345678"
+                        className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono uppercase"
                       />
-                      <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-
-                  {/* Divided License & Driver Details Section */}
-                  {selfDrive && (
-                    <div className="mt-3 pt-3 border-t border-blue-100 animate-fade-in space-y-3">
-                      {/* Driver Assignment Toggle */}
-                      <div className="flex items-center justify-between p-2.5 bg-white/80 rounded-lg border border-blue-100">
-                        <div className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-blue-600" />
-                          <div>
-                            <span className="text-xs font-bold text-slate-900 block">Renter is the Designated Driver</span>
-                            <span className="text-[11px] text-slate-500">Auto-fill driver name using customer profile</span>
-                          </div>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            id="booking-renter-driver-toggle"
-                            type="checkbox"
-                            checked={renterIsDriver}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setRenterIsDriver(checked);
-                              if (checked) {
-                                setDriverName(name);
-                              }
-                            }}
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                        </label>
-                      </div>
-
-                      {/* Driver Name and Birthdate Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {/* Driver Name Field */}
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                            <User className="w-3.5 h-3.5 text-blue-600" />
-                            Driver Full Name
-                          </label>
-                          <input
-                            id="booking-driver-name-input"
-                            type="text"
-                            value={renterIsDriver ? (name || 'Same as Renter') : driverName}
-                            onChange={(e) => setDriverName(e.target.value)}
-                            disabled={renterIsDriver}
-                            placeholder="e.g. Maria Santos"
-                            className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                              renterIsDriver ? 'bg-slate-100/80 text-slate-500 cursor-not-allowed border-slate-200' : 'border-slate-200 text-slate-900'
-                            }`}
-                          />
-                        </div>
-
-                        {/* Driver Birthdate Field */}
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                            Driver Birthdate
-                          </label>
-                          <input
-                            id="booking-driver-birthdate-input"
-                            type="date"
-                            value={driverBirthdate}
-                            onChange={(e) => setDriverBirthdate(e.target.value)}
-                            max={new Date().toISOString().split('T')[0]}
-                            className="w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
-                          />
-                        </div>
-                      </div>
-
-                      {/* License Number & Expiration Date */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {/* License Number Field */}
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                            License Number <span className="text-red-500">*</span>
-                          </label>
-                          <input
-                            id="booking-license-no-input"
-                            type="text"
-                            required={selfDrive}
-                            value={licenseNumber}
-                            onChange={(e) => setLicenseNumber(e.target.value)}
-                            placeholder="DL-8893021"
-                            className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                              errors.licenseNumber ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
-                            }`}
-                          />
-                          {errors.licenseNumber && (
-                            <p className="text-[11px] text-red-600 mt-1">{errors.licenseNumber}</p>
-                          )}
-                        </div>
-
-                        {/* Expiration Date Field */}
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                            Expiration Date <span className="text-red-500">*</span>
-                          </label>
-                          <input
-                            id="booking-license-exp-input"
-                            type="text"
-                            required={selfDrive}
-                            value={licenseExpiration}
-                            onChange={(e) => setLicenseExpiration(e.target.value)}
-                            placeholder="01/01/2030"
-                            className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                              errors.licenseExpiration ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-200'
-                            }`}
-                          />
-                          {errors.licenseExpiration && (
-                            <p className="text-[11px] text-red-600 mt-1">{errors.licenseExpiration}</p>
-                          )}
-                        </div>
-                      </div>
+                      {errors.licenseNumber && <p className="text-[10px] text-red-600 mt-0.5">{errors.licenseNumber}</p>}
                     </div>
-                  )}
-                </div>
-              ) : (
-                /* Van Notice - Strictly with Driver */
-                <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 flex items-start gap-3 text-xs text-slate-700">
-                  <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-slate-900">Company Chauffeur Included (Mandatory)</span>
-                    <p className="mt-0.5 text-slate-600 leading-relaxed">
-                      Vans are strictly dispatched with a certified company driver for passenger safety and regulatory compliance. Self-drive is disabled for all van reservations.
-                    </p>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                        License Expiration <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={licenseExpiration}
+                        onChange={(e) => setLicenseExpiration(e.target.value)}
+                        className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      />
+                      {errors.licenseExpiration && <p className="text-[10px] text-red-600 mt-0.5">{errors.licenseExpiration}</p>}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-2.5 p-2.5 bg-blue-50/70 border border-blue-200/80 rounded-lg text-xs text-blue-900 flex items-center gap-2">
+                <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Toyota Hiace Commuter Van is strictly operated <strong>With Professional Driver</strong> included.</span>
+              </div>
+            )}
           </div>
 
           {/* Section: Route & Location */}
           <div className="pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                3. Route Details
-              </label>
-
-              {/* Pickup Mode Toggle */}
-              <button
-                type="button"
-                id="booking-pickup-preset-toggle"
-                onClick={() => {
-                  const next = !isPickupPreset;
-                  setIsPickupPreset(next);
-                  if (next && !PRESET_PICKUP_LOCATIONS.includes(startLocation)) {
-                    setStartLocation(PRESET_PICKUP_LOCATIONS[0]);
-                  }
-                }}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border ${
-                  isPickupPreset
-                    ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                }`}
-                title="Toggle between Garage Pickup presets and Custom Location input"
-              >
-                {isPickupPreset ? (
-                  <>
-                    <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                    <span>Garage Pickup</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  </>
-                ) : (
-                  <>
-                    <Edit3 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    <span>Custom Location</span>
-                    <span className="w-2 h-2 rounded-full bg-slate-400" />
-                  </>
-                )}
-              </button>
-            </div>
-
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-slate-400" />
+              3. Route & Locations
+            </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Start Location (Preset Dropdown or Custom Input) */}
-              <div className="min-w-0">
+              <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                    Start Location <span className="text-red-500">*</span>
+                  <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                    Pick-up Location <span className="text-red-500">*</span>
                   </label>
-                  <span className="text-[10px] text-slate-600 font-medium">
-                    {isPickupPreset ? 'Preset Hub' : 'Custom Input'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPickupPreset(!isPickupPreset);
+                      if (isPickupPreset) {
+                        setStartLocation('');
+                      } else {
+                        setStartLocation(PRESET_PICKUP_LOCATIONS[0]);
+                      }
+                    }}
+                    className="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline"
+                  >
+                    {isPickupPreset ? 'Enter Custom Address' : 'Use Garage Preset'}
+                  </button>
                 </div>
 
                 {isPickupPreset ? (
-                  <div className="space-y-1.5">
-                    <div className="relative">
-                      <Building2 className="w-4 h-4 text-blue-600 absolute left-3 top-3 pointer-events-none" />
-                      <select
-                        id="booking-startlocation-select"
-                        required
-                        value={startLocation}
-                        onChange={(e) => setStartLocation(e.target.value)}
-                        className={`w-full min-w-0 max-w-full block box-border pl-9 pr-8 py-2.5 text-xs bg-blue-50/50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800 appearance-none cursor-pointer ${
-                          errors.startLocation ? 'border-red-400' : 'border-blue-200'
-                        }`}
-                      >
-                        <option value={PRESET_PICKUP_LOCATIONS[0]}>
-                          Isle of Patmos, Zone 2, Barangay Culipat, Tarlac City
-                        </option>
-                        <option value={PRESET_PICKUP_LOCATIONS[1]}>
-                          Lot 35 Blk 27 Maasikaso St. Fiesta Communities Matatalaib
-                        </option>
-                      </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
-                        <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
-                          <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-                        </svg>
-                      </div>
-                    </div>
-
-                    {/* Quick Preset Selector Buttons */}
-                    <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setStartLocation(PRESET_PICKUP_LOCATIONS[0])}
-                        className={`text-left p-1.5 rounded-md border text-[10px] leading-tight transition-all ${
-                          startLocation === PRESET_PICKUP_LOCATIONS[0]
-                            ? 'bg-blue-100/70 border-blue-300 font-bold text-blue-900 shadow-xs'
-                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                        }`}
-                      >
-                        <span className="block text-blue-700 font-bold">Zone 2 Culipat</span>
-                        <span className="text-[9px] text-slate-500 block truncate">Isle of Patmos</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setStartLocation(PRESET_PICKUP_LOCATIONS[1])}
-                        className={`text-left p-1.5 rounded-md border text-[10px] leading-tight transition-all ${
-                          startLocation === PRESET_PICKUP_LOCATIONS[1]
-                            ? 'bg-blue-100/70 border-blue-300 font-bold text-blue-900 shadow-xs'
-                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                        }`}
-                      >
-                        <span className="block text-blue-700 font-bold">Fiesta Communities</span>
-                        <span className="text-[9px] text-slate-500 block truncate">Matatalaib</span>
-                      </button>
-                    </div>
-                  </div>
+                  <select
+                    value={startLocation}
+                    onChange={(e) => setStartLocation(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  >
+                    {PRESET_PICKUP_LOCATIONS.map((loc, idx) => (
+                      <option key={idx} value={loc}>{loc}</option>
+                    ))}
+                  </select>
                 ) : (
-                  <div className="relative">
-                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                    <input
-                      id="booking-startlocation-input"
-                      type="text"
-                      required
-                      value={startLocation}
-                      onChange={(e) => setStartLocation(e.target.value)}
-                      placeholder="e.g. SM City Tarlac, Matatalaib, etc."
-                      className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        errors.startLocation ? 'border-red-400' : 'border-slate-200'
-                      }`}
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={startLocation}
+                    onChange={(e) => setStartLocation(e.target.value)}
+                    placeholder="Enter custom pick-up address..."
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 )}
                 {errors.startLocation && <p className="text-[11px] text-red-600 mt-1">{errors.startLocation}</p>}
               </div>
 
-              {/* Destination */}
-              <div className="min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                    Destination <span className="text-red-500">*</span>
-                  </label>
-                </div>
-                <div className="relative">
-                  <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                  <input
-                    id="booking-destination-input"
-                    type="text"
-                    required
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                    placeholder="e.g. San Fernando, Pampanga"
-                    className={`w-full min-w-0 max-w-full block box-border pl-9 pr-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      errors.destination ? 'border-red-400' : 'border-slate-200'
-                    }`}
-                  />
-                </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                  Destination / Drop-off <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="booking-destination-input"
+                  type="text"
+                  required
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                  placeholder="e.g. Baguio City, NAIA Terminal 3, Pangasinan"
+                  className={`w-full px-3 py-2 text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium ${
+                    errors.destination ? 'border-red-400' : 'border-slate-200'
+                  }`}
+                />
                 {errors.destination && <p className="text-[11px] text-red-600 mt-1">{errors.destination}</p>}
               </div>
             </div>
           </div>
 
-          {/* Section: Date, Time & Multi-day Duration */}
-          <div className="pt-2 border-t border-slate-100">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              4. Schedule & Duration
-            </label>
+          {/* Section: Flexible Schedule & Duration with Rate Helper */}
+          <div className="pt-2 border-t border-slate-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                4. Schedule & Flexible Duration
+              </label>
+              <span className="text-[11px] font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 font-bold">
+                {formatDurationDisplay(durationHours)}
+              </span>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Start Date */}
-              <div className="min-w-0">
-                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Start Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="booking-startdate-input"
-                  type="date"
-                  required
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
-                    errors.startDate ? 'border-red-400' : 'border-slate-200'
+            {/* Quick Duration Preset Tier Buttons */}
+            <div>
+              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                Standard Duration Presets & Rates:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelectPresetHours(12)}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    durationHours === 12 && bookingMode === 'preset'
+                      ? 'bg-blue-50 border-blue-600 ring-1 ring-blue-600 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                   }`}
-                />
-                {errors.startDate && <p className="text-[11px] text-red-600 mt-1">{errors.startDate}</p>}
-              </div>
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900">12 Hours</span>
+                    {durationHours === 12 && bookingMode === 'preset' && <Check className="w-3 h-3 text-blue-600" />}
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-blue-600 block mt-0.5">₱1,000</span>
+                </button>
 
-              {/* Start Time */}
-              <div className="min-w-0">
-                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Start Time <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="booking-starttime-input"
-                  type="time"
-                  required
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
-                    errors.startTime ? 'border-red-400' : 'border-slate-200'
+                <button
+                  type="button"
+                  onClick={() => handleSelectPresetHours(18)}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    durationHours === 18 && bookingMode === 'preset'
+                      ? 'bg-blue-50 border-blue-600 ring-1 ring-blue-600 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                   }`}
-                />
-                {errors.startTime && <p className="text-[11px] text-red-600 mt-1">{errors.startTime}</p>}
-              </div>
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900">18 Hours</span>
+                    {durationHours === 18 && bookingMode === 'preset' && <Check className="w-3 h-3 text-blue-600" />}
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-blue-600 block mt-0.5">₱1,300</span>
+                </button>
 
-              {/* Number of Days */}
-              <div className="min-w-0">
-                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  No. of Days <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="booking-noofdays-input"
-                  type="number"
-                  min="1"
-                  max="60"
-                  step="1"
-                  required
-                  value={noOfDays}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '') {
-                      setNoOfDays('');
-                    } else {
-                      const parsed = parseInt(val, 10);
-                      setNoOfDays(isNaN(parsed) ? '' : parsed);
-                    }
+                <button
+                  type="button"
+                  onClick={() => handleSelectPresetHours(24)}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    durationHours === 24 && bookingMode === 'preset'
+                      ? 'bg-blue-50 border-blue-600 ring-1 ring-blue-600 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900">24h (1 Day)</span>
+                    {durationHours === 24 && bookingMode === 'preset' && <Check className="w-3 h-3 text-blue-600" />}
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-blue-600 block mt-0.5">₱1,500</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectPresetHours(48)}
+                  className={`p-2.5 rounded-xl border text-left transition-all ${
+                    durationHours === 48 && bookingMode === 'preset'
+                      ? 'bg-blue-50 border-blue-600 ring-1 ring-blue-600 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900">2 Days (48h)</span>
+                    {durationHours === 48 && bookingMode === 'preset' && <Check className="w-3 h-3 text-blue-600" />}
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-blue-600 block mt-0.5">₱3,000</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBookingMode('custom');
                   }}
-                  className={`w-full min-w-0 max-w-full block box-border px-3 py-2.5 text-base sm:text-xs bg-slate-50 border rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${
-                    errors.noOfDays ? 'border-red-400' : 'border-slate-200'
+                  className={`p-2.5 rounded-xl border text-left transition-all col-span-2 sm:col-span-1 ${
+                    bookingMode === 'custom'
+                      ? 'bg-purple-50 border-purple-600 ring-1 ring-purple-600 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                   }`}
-                />
-                {errors.noOfDays && <p className="text-[11px] text-red-600 mt-1">{errors.noOfDays}</p>}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900">Custom Time</span>
+                    {bookingMode === 'custom' && <Edit3 className="w-3 h-3 text-purple-600" />}
+                  </div>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">Pick any hours</span>
+                </button>
               </div>
             </div>
 
-            {/* Calculated Return Time Preview Pill with 22-Hour Rule */}
-            {calculatedEndPreview && (
-              <div className="mt-3 space-y-1.5">
-                <div className="p-3 bg-slate-900 text-slate-100 rounded-lg text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+            {/* Date & Time Input Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+              {/* Departure Start */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                  <span>Start / Pick-Up Schedule</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                      Start Date <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="booking-startdate-input"
+                      type="date"
+                      required
+                      value={startDate}
+                      onChange={(e) => handleStartDateChange(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                      Start Time <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="booking-starttime-input"
+                      type="time"
+                      required
+                      value={startTime}
+                      onChange={(e) => handleStartTimeChange(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Scheduled Return / End */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                    <span>Return / Drop-off Schedule</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-500 font-normal">
+                    {durationHours} hrs total
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                      Return Date <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="booking-enddate-input"
+                      type="date"
+                      required
+                      value={endDate}
+                      onChange={(e) => handleEndDateChange(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                      Return Time <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="booking-endtime-input"
+                      type="time"
+                      required
+                      value={endTime}
+                      onChange={(e) => handleEndTimeChange(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
+                </div>
+                {errors.endTime && <p className="text-[10px] text-red-600">{errors.endTime}</p>}
+              </div>
+            </div>
+
+            {/* Live Buffer & Turnaround Banner */}
+            {startDate && startTime && endDate && endTime && (
+              <div className="space-y-2">
+                <div className="p-3 bg-slate-900 text-slate-100 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>
-                      Scheduled Return (22h Rule): <strong className="text-white font-mono">{calculatedEndPreview}</strong>
-                    </span>
+                    <div>
+                      <span className="text-slate-400 text-[10px] block uppercase font-mono">Scheduled Vehicle Return</span>
+                      <strong className="text-white font-mono text-xs">
+                        {formatDateOnly(endDate)} at {formatTimeOnly(endTime)} ({formatDurationDisplay(durationHours)})
+                      </strong>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 self-start sm:self-auto">
-                    <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-emerald-400 border border-slate-700 font-bold">
-                      {totalRentalHours}h Total Rental
-                    </span>
-                    <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700">
-                      -2h Buffer
+                  <div className="flex items-center gap-1.5 bg-slate-800/90 px-2.5 py-1 rounded-lg border border-slate-700">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[11px] text-slate-300">
+                      Cleaning Buffer: Next pickup ready <strong className="text-emerald-400 font-mono">{formatTimeOnly(getBookingTurnaroundReadyDateTime({ startDate, startTime, endDate, endTime, durationHours }))}</strong>
                     </span>
                   </div>
                 </div>
 
-                {/* Clear Policy Note */}
-                <div className="px-3 py-2 bg-blue-50/80 border border-blue-200/80 rounded-lg text-[11px] text-blue-900 flex items-start gap-2">
+                <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-[11px] text-blue-900 flex items-start gap-2">
                   <Info className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
                   <p className="leading-relaxed">
-                    <strong>22-Hour Rental Rule:</strong> Each rental day covers 22 hours (return is 2 hours before the 24-hour cycle). Next customer booking ready at <span className="font-mono font-bold text-blue-950">{turnaroundReadyPreview}</span> (4-hour cleaning window).
+                    <strong>Mandatory {TURNOVER_CLEANING_HOURS}-Hour Cleaning Buffer:</strong> Every vehicle undergoes a 3-hour turnaround & sanitization buffer upon return before the next customer reservation can commence.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Real-time Conflict Overlap Warning */}
+            {/* Real-time Conflict Overlap & Buffer Warning */}
             {activeConflict?.hasConflict && (
-              <div className="mt-3 p-3 bg-red-50 border border-red-300 rounded-lg text-xs text-red-900 space-y-1.5 animate-fade-in">
+              <div className="p-3.5 bg-red-50 border border-red-300 rounded-xl text-xs text-red-900 space-y-2 animate-fade-in">
                 <div className="flex items-center gap-1.5 font-bold text-red-950">
                   <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-                  <span>Schedule Conflict: Overlapping Booking Detected</span>
+                  <span>
+                    {activeConflict.isBufferConflict 
+                      ? 'Turnover Buffer Conflict (3-Hour Cleaning Window)' 
+                      : 'Direct Schedule Overlap Conflict'}
+                  </span>
                 </div>
-                <p className="text-[11px] text-red-800 leading-relaxed">
-                  This {vehicle} already has active reservations during the requested period. Only consecutive available dates should be booked:
-                </p>
-                <div className="space-y-1 pt-1 border-t border-red-200/70">
+                {activeConflict.reason && (
+                  <p className="text-[11px] text-red-800 leading-relaxed font-medium">
+                    {activeConflict.reason}
+                  </p>
+                )}
+                <div className="space-y-1 pt-1.5 border-t border-red-200">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-red-700 block">
+                    Conflicting Reservations:
+                  </span>
                   {activeConflict.conflictingBookings.map((cb) => (
-                    <div key={cb.id} className="text-[11px] font-mono text-red-900 flex items-center justify-between">
+                    <div key={cb.id} className="text-[11px] font-mono text-red-950 flex items-center justify-between bg-white/70 px-2 py-1 rounded border border-red-200">
                       <span className="font-bold">{cb.name}</span>
                       <span>
-                        {formatDateOnly(cb.startDate)} ({cb.noOfDays} day{cb.noOfDays > 1 ? 's' : ''})
+                        {formatDateOnly(cb.startDate)} {formatTimeOnly(cb.startTime)} → {formatTimeOnly(cb.endTime || getBookingEndDateTime(cb))}
                       </span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Section: Billing & Settlement with ₱300 Deposit Security & Rate Helper */}
+          <div className="pt-3 border-t border-slate-200 space-y-3 bg-slate-50/70 p-3.5 rounded-xl border">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <CreditCard className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Billing & Settlement (₱300 Deposit Workflow)</span>
+              </label>
+
+              {/* Rate Helper Suggested Action Pill & Status Selector */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentAmount(String(calculatedSuggestedRate))}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg border border-blue-300 transition-colors flex items-center gap-1 shrink-0"
+                  title="Click to apply standard suggested rate based on booked hours"
+                >
+                  <DollarSign className="w-3 h-3 text-blue-600" />
+                  Suggested: ₱{calculatedSuggestedRate.toLocaleString()} ({formatDurationDisplay(durationHours)})
+                </button>
+
+                <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 shadow-2xs shrink-0">
+                  {(['pending', 'paid', 'partial'] as const).map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setPaymentStatus(status)}
+                      className={`px-2 py-0.5 text-[10px] font-mono uppercase font-bold rounded transition-all ${
+                        paymentStatus === status
+                          ? status === 'paid'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : status === 'partial'
+                            ? 'bg-sky-600 text-white shadow-xs'
+                            : 'bg-amber-500 text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Mandatory Deposit (₱300) Component - Tells booking form if customer paid deposit to secure vehicle */}
+            <div
+              id="booking-deposit-workflow-card"
+              className={`p-3 rounded-xl border transition-all ${
+                depositPaid
+                  ? 'bg-emerald-50/90 border-emerald-300 shadow-2xs'
+                  : 'bg-amber-50/80 border-amber-300'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    id="deposit-paid-checkbox"
+                    checked={depositPaid}
+                    onChange={(e) => handleToggleDepositPaid(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer accent-emerald-600"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-slate-900">
+                        Customer Paid ₱300 Security Deposit
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          depositPaid
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-amber-100 text-amber-800 border-amber-300'
+                        }`}
+                      >
+                        {depositPaid ? 'Vehicle Secured' : 'Unpaid / Incomplete Deposit'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
+                      {depositPaid
+                        ? 'Deposit received! The vehicle is locked in. The ₱300 deposit will be automatically deducted from the total fee.'
+                        : 'Customer must pay the ₱300 deposit to secure the reservation.'}
+                    </p>
+                  </div>
+                </label>
+
+                {depositPaid && (
+                  <div className="flex items-center gap-1.5 shrink-0 bg-white/90 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                    <label className="text-[10px] font-bold text-emerald-800 uppercase">
+                      Deposit Amount:
+                    </label>
+                    <span className="text-xs font-mono font-bold text-emerald-900">₱</span>
+                    <input
+                      type="number"
+                      value={downpaymentAmount}
+                      onChange={(e) => setDownpaymentAmount(e.target.value)}
+                      placeholder="300"
+                      className="w-16 px-1 py-0.5 text-xs bg-white border border-emerald-300 rounded font-mono font-bold text-emerald-900 text-right focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic Live Fee Calculation Strip */}
+              {(() => {
+                const totalVal = parseFloat(paymentAmount) || calculatedSuggestedRate || 0;
+                const depositVal = depositPaid ? (parseFloat(downpaymentAmount) || 300) : 0;
+                const balanceVal = paymentStatus === 'paid' ? 0 : Math.max(0, totalVal - depositVal);
+
+                return (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 grid grid-cols-3 gap-2 text-center text-xs font-mono">
+                    <div className="p-1.5 bg-white/90 rounded-lg border border-slate-200">
+                      <span className="text-[9px] uppercase text-slate-500 font-sans block font-semibold">
+                        Total Rental Fee
+                      </span>
+                      <span className="font-bold text-slate-900 block">
+                        ₱{totalVal.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="p-1.5 bg-white/90 rounded-lg border border-emerald-200">
+                      <span className="text-[9px] uppercase text-emerald-700 font-sans font-bold block">
+                        Less Deposit Paid
+                      </span>
+                      <span className="font-bold text-emerald-700 block">
+                        {depositPaid ? `-₱${depositVal.toLocaleString()}` : '₱0'}
+                      </span>
+                    </div>
+                    <div className="p-1.5 bg-blue-50/90 rounded-lg border border-blue-200">
+                      <span className="text-[9px] uppercase text-blue-700 font-sans font-bold block">
+                        {paymentStatus === 'paid' ? 'Fully Settled' : 'Balance to Collect'}
+                      </span>
+                      <span className="font-bold text-blue-900 block">
+                        {paymentStatus === 'paid' ? '₱0' : `₱${balanceVal.toLocaleString()}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  Total Rental Amount (₱)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">₱</span>
+                  <input
+                    type="number"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="e.g. 1000, 1300, 1500"
+                    className="w-full pl-7 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono font-bold text-slate-900"
+                  />
+                </div>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  Admin can override any custom rate
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800"
+                >
+                  <option value="GCash">GCash</option>
+                  <option value="Maya">Maya</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="QRPh">QRPh</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  Reference # / Receipt
+                </label>
+                <input
+                  type="text"
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                  placeholder="e.g. Ref 9821..."
+                  className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Section: Notes & Tag Color */}
@@ -868,8 +1179,8 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
                 rows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="VIP client, child seat requested, luggage assistance..."
-                className="w-full px-3 py-2.5 text-base sm:text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                placeholder="Flexible pick-up note, child seat, special request..."
+                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               />
             </div>
 
@@ -901,22 +1212,22 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
           </div>
 
           {/* Form Actions */}
-          <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
+          <div className="pt-4 border-t border-slate-200 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 sm:gap-3">
             <button
               id="cancel-booking-form-btn"
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-xs"
+              className="px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors shadow-xs text-center"
             >
               Cancel
             </button>
             <button
               id="submit-booking-form-btn"
               type="submit"
-              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-md shadow-blue-600/20 active:scale-95 flex items-center gap-1.5"
+              className="px-5 py-2.5 sm:py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-md shadow-blue-600/20 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-blue-200" />
-              {editingBooking ? 'Save Changes' : 'Confirm & Schedule Booking'}
+              <span>{editingBooking ? 'Save Changes' : 'Confirm & Schedule Booking'}</span>
             </button>
           </div>
         </form>

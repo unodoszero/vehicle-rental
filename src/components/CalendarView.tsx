@@ -7,7 +7,8 @@ import {
 import { Booking, VehicleType } from '../types';
 import { 
   getMonthCalendarGrid, isBookingOnDay, calculateBookingTime, 
-  toISODateString, formatDateTime, formatDateOnly, formatTimeOnly, getBookingEndDateTime 
+  toISODateString, formatDateTime, formatDateOnly, formatTimeOnly, getBookingEndDateTime,
+  formatDurationDisplay
 } from '../utils/dateUtils';
 
 interface CalendarViewProps {
@@ -15,9 +16,9 @@ interface CalendarViewProps {
   onSelectBooking: (booking: Booking) => void;
   onAddBookingForDate: (dateString: string) => void;
   vehicleFilter: 'all' | VehicleType;
-  statusFilter: 'all' | 'active' | 'upcoming' | 'overtime';
+  statusFilter: 'all' | 'ongoing' | 'active' | 'upcoming' | 'overtime' | 'completed';
   onVehicleFilterChange: (filter: 'all' | VehicleType) => void;
-  onStatusFilterChange: (filter: 'all' | 'active' | 'upcoming' | 'overtime') => void;
+  onStatusFilterChange: (filter: 'all' | 'ongoing' | 'active' | 'upcoming' | 'overtime' | 'completed') => void;
 }
 
 const MONTH_NAMES = [
@@ -80,9 +81,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
       // Status filter
       const calc = calculateBookingTime(b, now);
+      if (statusFilter === 'ongoing' && !(calc.isActive || calc.isOvertime)) return false;
       if (statusFilter === 'active' && !calc.isActive) return false;
       if (statusFilter === 'upcoming' && !calc.isUpcoming) return false;
       if (statusFilter === 'overtime' && !calc.isOvertime) return false;
+      if (statusFilter === 'completed' && !calc.isCompleted) return false;
 
       // Search query
       if (searchQuery.trim()) {
@@ -109,7 +112,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   }, [filteredBookings, selectedDate]);
 
   // Color mapping helper
-  const getBadgeStyle = (booking: Booking, isOvertime: boolean) => {
+  const getBadgeStyle = (booking: Booking, isOvertime: boolean, isCompleted?: boolean) => {
+    if (isCompleted || booking.status === 'completed') {
+      return 'bg-emerald-50 text-emerald-900 border-emerald-300 border-l-3 border-l-emerald-600 shadow-2xs font-semibold';
+    }
+
     if (isOvertime) {
       return 'bg-red-100 text-red-900 border-red-200 border-l-3 border-l-red-600 shadow-xs animate-pulse';
     }
@@ -133,7 +140,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     }
   };
 
-  const getDotColor = (booking: Booking, isOvertime: boolean) => {
+  const getDotColor = (booking: Booking, isOvertime: boolean, isCompleted?: boolean) => {
+    if (isCompleted || booking.status === 'completed') return 'bg-emerald-600';
     if (isOvertime) return 'bg-red-500 ring-2 ring-red-300 animate-pulse';
     switch (booking.colorTag) {
       case 'emerald': return 'bg-emerald-500';
@@ -273,9 +281,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 shrink-0"
             >
               <option value="all">All Statuses</option>
-              <option value="overtime">Overtime Alerts</option>
+              <option value="ongoing">Ongoing (Active & Overtime)</option>
               <option value="active">Active on Road</option>
+              <option value="overtime">Overtime Alerts</option>
               <option value="upcoming">Upcoming</option>
+              <option value="completed">Completed Turnovers</option>
             </select>
           </div>
         </div>
@@ -334,11 +344,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     {/* Booking Indicators (Clean Dots / Overtime Pulse) */}
                     <div className="flex items-center justify-center gap-0.5 h-3">
                       {dayBookings.slice(0, 3).map((b, idx) => {
-                        const isOvertime = calculateBookingTime(b, now).isOvertime;
+                        const timeCalc = calculateBookingTime(b, now);
                         return (
                           <span
                             key={idx}
-                            className={`w-1.5 h-1.5 rounded-full ${getDotColor(b, isOvertime)}`}
+                            className={`w-1.5 h-1.5 rounded-full ${getDotColor(b, timeCalc.isOvertime, timeCalc.isCompleted)}`}
                           />
                         );
                       })}
@@ -393,6 +403,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   {selectedDateBookings.map((b) => {
                     const timeCalc = calculateBookingTime(b, now);
                     const isOvertime = timeCalc.isOvertime;
+                    const isCompleted = timeCalc.isCompleted;
                     return (
                       <div
                         key={b.id}
@@ -400,6 +411,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         className={`p-3.5 rounded-xl border bg-white shadow-xs cursor-pointer transition-all active:scale-99 ${
                           isOvertime
                             ? 'border-red-300 ring-1 ring-red-400/30'
+                            : isCompleted
+                            ? 'border-emerald-200 hover:border-emerald-300'
                             : 'border-slate-200 hover:border-blue-300'
                         }`}
                       >
@@ -409,12 +422,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white font-bold text-xs ${
                                 isOvertime
                                   ? 'bg-red-600 animate-pulse'
+                                  : isCompleted
+                                  ? 'bg-emerald-600'
                                   : b.vehicle === 'Car'
                                   ? 'bg-blue-600'
                                   : 'bg-emerald-600'
                               }`}
                             >
-                              <Car className="w-4 h-4" />
+                              {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : <Car className="w-4 h-4" />}
                             </div>
                             <div>
                               <div className="flex items-center gap-1.5">
@@ -432,13 +447,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           </div>
 
                           {/* Status Badge */}
-                          {isOvertime ? (
+                          {isCompleted ? (
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold shrink-0 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              Completed
+                            </span>
+                          ) : isOvertime ? (
                             <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold shrink-0 animate-pulse flex items-center gap-1">
                               <AlertTriangle className="w-3 h-3" />
                               Overtime
                             </span>
                           ) : timeCalc.isActive ? (
-                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold shrink-0">
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[10px] font-bold shrink-0">
                               Active
                             </span>
                           ) : (
@@ -451,7 +471,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-mono">
                           <span className="flex items-center gap-1">
                             <Clock className="w-3 h-3 text-slate-400" />
-                            {b.startTime} ({b.noOfDays}d)
+                            {b.startTime} ({b.durationHours ? `${b.durationHours}h` : `${b.noOfDays}d`})
                           </span>
                           <span className="truncate max-w-[180px] text-right text-slate-600">
                             {b.startLocation} &rarr; {b.destination}
@@ -565,7 +585,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             }
                           }
 
-                          const badgeStyle = getBadgeStyle(b, isOvertime);
+                          const badgeStyle = getBadgeStyle(b, isOvertime, timeCalc.isCompleted);
 
                           return (
                             <div
@@ -576,16 +596,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                 onSelectBooking(b);
                               }}
                               className={`px-2 py-1 text-[10px] font-bold leading-tight cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] border-t border-b border-r ${roundedClasses} ${badgeStyle} flex items-center justify-between gap-1`}
-                              title={`${b.name} (${b.vehicle}) - ${b.startDate} to ${formatDateTime(endDate)}`}
+                              title={`${b.name} (${b.vehicle}) - ${b.startDate} to ${formatDateTime(endDate)}${timeCalc.isCompleted ? ' (Completed)' : ''}`}
                             >
                               <div className="flex items-center gap-1 min-w-0 truncate">
-                                {isOvertime ? (
+                                {timeCalc.isCompleted ? (
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                ) : isOvertime ? (
                                   <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
                                 ) : (
                                   <Car className="w-2.5 h-2.5 opacity-70 shrink-0" />
                                 )}
                                 <span className="truncate">
-                                  {isOvertime ? `OVERTIME: ${b.name}` : `${b.id}: ${b.name}`}
+                                  {timeCalc.isCompleted
+                                    ? `✓ ${b.id}: ${b.name}`
+                                    : isOvertime
+                                    ? `OVERTIME: ${b.name}`
+                                    : `${b.id}: ${b.name}`}
                                 </span>
                               </div>
 
@@ -617,13 +643,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             filteredBookings.map((b) => {
               const timeCalc = calculateBookingTime(b, now);
               const isOvertime = timeCalc.isOvertime;
+              const isCompleted = timeCalc.isCompleted;
               return (
                 <div
                   key={b.id}
                   id={`booking-list-row-${b.id}`}
                   onClick={() => onSelectBooking(b)}
                   className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition-colors cursor-pointer ${
-                    isOvertime ? 'bg-red-50/60' : ''
+                    isOvertime ? 'bg-red-50/60' : isCompleted ? 'bg-emerald-50/30' : ''
                   }`}
                 >
                   <div className="flex items-start gap-3.5">
@@ -631,12 +658,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
                         isOvertime
                           ? 'bg-red-600 text-white animate-pulse'
+                          : isCompleted
+                          ? 'bg-emerald-600 text-white'
                           : b.vehicle === 'Car'
                           ? 'bg-blue-600 text-white'
                           : 'bg-emerald-600 text-white'
                       }`}
                     >
-                      <Car className="w-5 h-5" />
+                      {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : <Car className="w-5 h-5" />}
                     </div>
 
                     <div className="space-y-1">
@@ -655,6 +684,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         {b.plateNumber && (
                           <span className="font-mono text-[10px] bg-slate-800 text-slate-200 px-1.5 py-0.5 rounded font-bold">
                             {b.plateNumber}
+                          </span>
+                        )}
+                        {isCompleted && (
+                          <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Turnover Completed
                           </span>
                         )}
                       </div>
@@ -677,13 +712,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-3 self-end sm:self-center">
-                    {isOvertime ? (
+                    {isCompleted ? (
+                      <span className="px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Completed
+                      </span>
+                    ) : isOvertime ? (
                       <span className="px-3 py-1 bg-red-100 text-red-700 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 animate-pulse">
                         <AlertTriangle className="w-3.5 h-3.5" />
                         OVERTIME ({timeCalc.formattedRemaining})
                       </span>
                     ) : timeCalc.isActive ? (
-                      <span className="px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                      <span className="px-3 py-1 bg-blue-100 text-blue-800 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5" />
                         Active ({timeCalc.formattedRemaining})
                       </span>
